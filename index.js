@@ -148,20 +148,44 @@ app.post('/sms', async (req, res) => {
 
   console.log(`SMS from ${from}: ${text}`);
 
-  const conversation = await getOrCreateConversation(from);
-  await saveMessage(conversation.id, 'user', text);
+  try {
+    const conversation = await getOrCreateConversation(from);
+    console.log(`Conversation ID: ${conversation.id}`);
+    
+    await saveMessage(conversation.id, 'user', text);
+    console.log('User message saved');
 
-  const history = await getMessages(conversation.id);
-  const chatHistory = history.map(m => ({ role: m.role, content: m.content }));
-  const systemPrompt = await getSystemPrompt();
+    const history = await getMessages(conversation.id);
+    const chatHistory = history.map(m => ({ role: m.role, content: m.content }));
+    const systemPrompt = await getSystemPrompt();
+    console.log(`History length: ${chatHistory.length}`);
 
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
-    messages: [
-      { role: 'system', content: systemPrompt },
-      ...chatHistory
-    ]
-  });
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        ...chatHistory
+      ]
+    });
+
+    const reply = response.choices[0].message.content;
+    console.log(`AI reply: ${reply}`);
+    
+    await saveMessage(conversation.id, 'assistant', reply);
+
+    await twilioClient.messages.create({
+      body: reply,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      to: from
+    });
+    
+    console.log('SMS sent successfully');
+    res.sendStatus(200);
+  } catch(err) {
+    console.error('SMS handler error:', err);
+    res.sendStatus(500);
+  }
+});
 
   const reply = response.choices[0].message.content;
   await saveMessage(conversation.id, 'assistant', reply);
