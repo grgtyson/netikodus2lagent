@@ -187,17 +187,6 @@ app.post('/sms', async (req, res) => {
   }
 });
 
-  const reply = response.choices[0].message.content;
-  await saveMessage(conversation.id, 'assistant', reply);
-
-  await twilioClient.messages.create({
-    body: reply,
-    from: process.env.TWILIO_PHONE_NUMBER,
-    to: from
-  });
-
-  res.sendStatus(200);
-});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
