@@ -13,14 +13,14 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
-const SYSTEM_PROMPT = `Sa oled Netikodu polsterduse puhastuse assistent. Sinu ülesanne on kvalifitseerida klienti järgmiste küsimustega ükshaaval:
-1. Mis mööblit soovite puhastada? (diivan, tool, auto, muu)
-2. Kui suur see on? (mitu istekohta või suurus)
-3. Mis materjalist see on? (kangas, nahk, muu)
-4. Mis on teie asukoht?
-5. Millal sooviksite teenust?
-
-Küsi üks küsimus korraga. Ole sõbralik ja professionaalne. Vasta alati eesti keeles. Kui klient küsib midagi teenuse kohta, vasta lühidalt ja jätka kvalifitseerimisega.`;
+async function getSystemPrompt() {
+  const { data } = await supabase
+    .from('settings')
+    .select('value')
+    .eq('key', 'system_prompt')
+    .single();
+  return data?.value || 'Sa oled abivalmis assistent.';
+}
 
 async function getOrCreateConversation(phoneNumber) {
   let { data } = await supabase
@@ -84,11 +84,12 @@ app.post('/webhook', async (req, res) => {
 
       const history = await getMessages(conversation.id);
       const chatHistory = history.map(m => ({ role: m.role, content: m.content }));
+      const systemPrompt = await getSystemPrompt();
 
       const response = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: systemPrompt },
           ...chatHistory
         ]
       });
@@ -109,7 +110,7 @@ app.post('/webhook', async (req, res) => {
         })
       });
 
-      console.log(`Message from ${from}: ${text}`);
+      console.log(`WhatsApp from ${from}: ${text}`);
       console.log(`AI reply: ${reply}`);
     }
 
@@ -127,6 +128,20 @@ app.get('/conversations', async (req, res) => {
   res.json(data);
 });
 
+app.get('/prompt', async (req, res) => {
+  const prompt = await getSystemPrompt();
+  res.json({ prompt });
+});
+
+app.post('/prompt', async (req, res) => {
+  const { prompt } = req.body;
+  await supabase
+    .from('settings')
+    .update({ value: prompt, updated_at: new Date() })
+    .eq('key', 'system_prompt');
+  res.json({ success: true });
+});
+
 app.post('/sms', async (req, res) => {
   const from = req.body.From;
   const text = req.body.Body;
@@ -138,11 +153,12 @@ app.post('/sms', async (req, res) => {
 
   const history = await getMessages(conversation.id);
   const chatHistory = history.map(m => ({ role: m.role, content: m.content }));
+  const systemPrompt = await getSystemPrompt();
 
   const response = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt },
       ...chatHistory
     ]
   });
