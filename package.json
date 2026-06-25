@@ -1,0 +1,26 @@
+{
+  "name": "netikodus2lagent",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://grgtyson@github.com/grgtyson/netikodus2lagent.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/grgtyson/netikodus2lagent/issues"
+  },
+  "homepage": "https://github.com/grgtyson/netikodus2lagent#readme",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "openai": "^6.45.0"
+  }
+}
