@@ -1,13 +1,13 @@
 require('dotenv').config();
 const express = require('express');
 const OpenAI = require('openai');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 app.use(express.json());
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-const conversations = {};
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 const SYSTEM_PROMPT = `Sa oled Netikodu polsterduse puhastuse assistent. Sinu ülesanne on kvalifitseerida klienti järgmiste küsimustega ükshaaval:
 1. Mis mööblit soovite puhastada? (diivan, tool, auto, muu)
@@ -17,6 +17,39 @@ const SYSTEM_PROMPT = `Sa oled Netikodu polsterduse puhastuse assistent. Sinu ü
 5. Millal sooviksite teenust?
 
 Küsi üks küsimus korraga. Ole sõbralik ja professionaalne. Vasta alati eesti keeles. Kui klient küsib midagi teenuse kohta, vasta lühidalt ja jätka kvalifitseerimisega.`;
+
+async function getOrCreateConversation(phoneNumber) {
+  let { data } = await supabase
+    .from('conversations')
+    .select('*')
+    .eq('phone_number', phoneNumber)
+    .single();
+
+  if (!data) {
+    const { data: newConv } = await supabase
+      .from('conversations')
+      .insert({ phone_number: phoneNumber })
+      .select()
+      .single();
+    data = newConv;
+  }
+  return data;
+}
+
+async function getMessages(conversationId) {
+  const { data } = await supabase
+    .from('messages')
+    .select('*')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: true });
+  return data || [];
+}
+
+async function saveMessage(conversationId, role, content) {
+  await supabase
+    .from('messages')
+    .insert({ conversation_id: conversationId, role, content });
+}
 
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
@@ -42,22 +75,22 @@ app.post('/webhook', async (req, res) => {
       const from = message.from;
       const text = message.text.body;
 
-      if (!conversations[from]) {
-        conversations[from] = [];
-      }
+      const conversation = await getOrCreateConversation(from);
+      await saveMessage(conversation.id, 'user', text);
 
-      conversations[from].push({ role: 'user', content: text });
+      const history = await getMessages(conversation.id);
+      const chatHistory = history.map(m => ({ role: m.role, content: m.content }));
 
       const response = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
-          ...conversations[from]
+          ...chatHistory
         ]
       });
 
       const reply = response.choices[0].message.content;
-      conversations[from].push({ role: 'assistant', content: reply });
+      await saveMessage(conversation.id, 'assistant', reply);
 
       await fetch(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
         method: 'POST',
@@ -71,12 +104,23 @@ app.post('/webhook', async (req, res) => {
           text: { body: reply }
         })
       });
+
+      console.log(`Message from ${from}: ${text}`);
+      console.log(`AI reply: ${reply}`);
     }
 
     res.sendStatus(200);
   } else {
     res.sendStatus(404);
   }
+});
+
+app.get('/conversations', async (req, res) => {
+  const { data } = await supabase
+    .from('conversations')
+    .select('*, messages(*)')
+    .order('created_at', { ascending: false });
+  res.json(data);
 });
 
 const PORT = process.env.PORT || 3000;
