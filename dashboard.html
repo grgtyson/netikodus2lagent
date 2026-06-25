@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="et">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Netikodu — Vestlused</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e8e8e8; height: 100vh; display: flex; }
+    
+    .sidebar { width: 320px; border-right: 1px solid #222; display: flex; flex-direction: column; }
+    .sidebar-header { padding: 20px; border-bottom: 1px solid #222; }
+    .sidebar-header h1 { font-size: 16px; font-weight: 600; color: #fff; }
+    .sidebar-header p { font-size: 12px; color: #666; margin-top: 4px; }
+    
+    .conversations { flex: 1; overflow-y: auto; }
+    .conv-item { padding: 16px 20px; border-bottom: 1px solid #1a1a1a; cursor: pointer; transition: background 0.15s; }
+    .conv-item:hover { background: #161616; }
+    .conv-item.active { background: #1a1a1a; border-left: 2px solid #3b82f6; }
+    .conv-phone { font-size: 14px; font-weight: 500; color: #e8e8e8; }
+    .conv-preview { font-size: 12px; color: #555; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .conv-time { font-size: 11px; color: #444; margin-top: 4px; }
+    
+    .main { flex: 1; display: flex; flex-direction: column; }
+    .main-header { padding: 20px 24px; border-bottom: 1px solid #222; display: flex; align-items: center; justify-content: space-between; }
+    .main-header h2 { font-size: 15px; font-weight: 500; }
+    .badge { font-size: 11px; background: #1d3a6e; color: #60a5fa; padding: 3px 8px; border-radius: 20px; }
+    
+    .messages { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 12px; }
+    .msg { max-width: 70%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.5; }
+    .msg.user { background: #1e1e1e; border: 1px solid #2a2a2a; align-self: flex-start; }
+    .msg.assistant { background: #1d3a6e; align-self: flex-end; }
+    .msg-meta { font-size: 11px; color: #444; margin-top: 4px; }
+    .msg.user .msg-meta { text-align: left; }
+    .msg.assistant .msg-meta { text-align: right; }
+    
+    .empty { flex: 1; display: flex; align-items: center; justify-content: center; color: #333; font-size: 14px; }
+    
+    .refresh-btn { background: #1e1e1e; border: 1px solid #2a2a2a; color: #aaa; padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+    .refresh-btn:hover { background: #252525; color: #e8e8e8; }
+  </style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="sidebar-header">
+    <h1>Netikodu S2L</h1>
+    <p id="conv-count">Laen vestlusi...</p>
+  </div>
+  <div class="conversations" id="conv-list"></div>
+</div>
+
+<div class="main">
+  <div class="main-header">
+    <h2 id="active-phone">Vali vestlus</h2>
+    <button class="refresh-btn" onclick="loadConversations()">↻ Uuenda</button>
+  </div>
+  <div class="messages" id="messages">
+    <div class="empty">Vali vasakult vestlus</div>
+  </div>
+</div>
+
+<script>
+  const API = window.location.origin;
+  let conversations = [];
+  let activeId = null;
+
+  async function loadConversations() {
+    try {
+      const res = await fetch(`${API}/conversations`);
+      conversations = await res.json();
+      
+      document.getElementById('conv-count').textContent = `${conversations.length} vestlust`;
+      
+      const list = document.getElementById('conv-list');
+      list.innerHTML = '';
+      
+      conversations.forEach(conv => {
+        const msgs = conv.messages || [];
+        const last = msgs[msgs.length - 1];
+        const div = document.createElement('div');
+        div.className = 'conv-item' + (conv.id === activeId ? ' active' : '');
+        div.innerHTML = `
+          <div class="conv-phone">+${conv.phone_number}</div>
+          <div class="conv-preview">${last ? last.content : 'Sõnumeid pole'}</div>
+          <div class="conv-time">${new Date(conv.created_at).toLocaleString('et-EE')}</div>
+        `;
+        div.onclick = () => showConversation(conv.id);
+        list.appendChild(div);
+      });
+    } catch(e) {
+      document.getElementById('conv-count').textContent = 'Viga laadimisel';
+    }
+  }
+
+  function showConversation(id) {
+    activeId = id;
+    const conv = conversations.find(c => c.id === id);
+    if (!conv) return;
+
+    document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
+    event.currentTarget.classList.add('active');
+
+    document.getElementById('active-phone').textContent = `+${conv.phone_number}`;
+
+    const msgs = conv.messages || [];
+    const container = document.getElementById('messages');
+    
+    if (msgs.length === 0) {
+      container.innerHTML = '<div class="empty">Sõnumeid pole</div>';
+      return;
+    }
+
+    container.innerHTML = msgs.map(m => `
+      <div>
+        <div class="msg ${m.role}">
+          ${m.content}
+        </div>
+        <div class="msg-meta">${m.role === 'user' ? 'Klient' : 'AI'} · ${new Date(m.created_at).toLocaleTimeString('et-EE')}</div>
+      </div>
+    `).join('');
+    
+    container.scrollTop = container.scrollHeight;
+  }
+
+  loadConversations();
+  setInterval(loadConversations, 30000);
+</script>
+
+</body>
+</html>
