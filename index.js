@@ -125,4 +125,36 @@ app.get('/conversations', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+app.post('/sms', async (req, res) => {
+  const from = req.body.From;
+  const text = req.body.Body;
+
+  console.log(`SMS from ${from}: ${text}`);
+
+  const conversation = await getOrCreateConversation(from);
+  await saveMessage(conversation.id, 'user', text);
+
+  const history = await getMessages(conversation.id);
+  const chatHistory = history.map(m => ({ role: m.role, content: m.content }));
+
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      ...chatHistory
+    ]
+  });
+
+  const reply = response.choices[0].message.content;
+  await saveMessage(conversation.id, 'assistant', reply);
+
+  const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+  await twilioClient.messages.create({
+    body: reply,
+    from: process.env.TWILIO_PHONE_NUMBER,
+    to: from
+  });
+
+  res.sendStatus(200);
+});
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
