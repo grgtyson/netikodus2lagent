@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
+const twilio = require('twilio');
 
 const app = express();
 app.use(express.json());
@@ -10,6 +11,7 @@ app.use(express.static(__dirname));
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
 const SYSTEM_PROMPT = `Sa oled Netikodu polsterduse puhastuse assistent. Sinu ülesanne on kvalifitseerida klienti järgmiste küsimustega ükshaaval:
 1. Mis mööblit soovite puhastada? (diivan, tool, auto, muu)
@@ -125,7 +127,6 @@ app.get('/conversations', async (req, res) => {
   res.json(data);
 });
 
-const PORT = process.env.PORT || 3000;
 app.post('/sms', async (req, res) => {
   const from = req.body.From;
   const text = req.body.Body;
@@ -149,7 +150,6 @@ app.post('/sms', async (req, res) => {
   const reply = response.choices[0].message.content;
   await saveMessage(conversation.id, 'assistant', reply);
 
-  const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
   await twilioClient.messages.create({
     body: reply,
     from: process.env.TWILIO_PHONE_NUMBER,
@@ -158,4 +158,6 @@ app.post('/sms', async (req, res) => {
 
   res.sendStatus(200);
 });
+
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
