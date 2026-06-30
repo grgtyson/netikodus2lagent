@@ -131,6 +131,8 @@ app.post('/prompt', async (req, res) => {
 
 app.post('/lead', async (req, res) => {
   try {
+    console.log('RAW BODY:', JSON.stringify(req.body));
+
     const name = req.body.name;
     const phone = req.body.telf;
     const client_type = req.body.client_type;
