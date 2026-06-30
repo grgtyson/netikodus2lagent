@@ -127,6 +127,48 @@ app.get('/conversations', async (req, res) => {
   res.json(data);
 });
 
+app.post('/conversations/:id/toggle-ai', async (req, res) => {
+  const { ai_enabled } = req.body;
+  await supabase
+    .from('conversations')
+    .update({ ai_enabled })
+    .eq('id', req.params.id);
+  res.json({ success: true });
+});
+
+app.post('/conversations/:id/send', async (req, res) => {
+  try {
+    const { message } = req.body;
+    const conversationId = req.params.id;
+
+    const { data: conversation } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('id', conversationId)
+      .single();
+
+    if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
+
+    await saveMessage(conversationId, 'assistant', message);
+
+    await twilioClient.messages.create({
+      body: message,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      to: conversation.phone_number
+    });
+
+    await supabase
+      .from('leads')
+      .update({ last_message_sent_at: new Date(), bump_sent: false })
+      .eq('conversation_id', conversationId);
+
+    res.json({ success: true });
+  } catch(err) {
+    console.error('Manual send error:', err);
+    res.sendStatus(500);
+  }
+});
+
 app.get('/prompt', async (req, res) => {
   const prompt = await getSystemPrompt();
   res.json({ prompt });
@@ -280,6 +322,17 @@ app.post('/sms', async (req, res) => {
 
     await saveMessage(conversation.id, 'user', text);
     console.log('User message saved');
+
+    await supabase
+      .from('leads')
+      .update({ last_message_sent_at: new Date(), bump_sent: false, status: 'vestluses' })
+      .eq('conversation_id', conversation.id);
+
+    if (conversation.ai_enabled === false) {
+      console.log('AI disabled for this conversation, skipping auto-reply');
+      return res.sendStatus(200);
+    }
+
     const history = await getMessages(conversation.id);
     const chatHistory = history.map(m => ({ role: m.role, content: m.content }));
     const systemPrompt = await getSystemPrompt();
@@ -295,11 +348,6 @@ app.post('/sms', async (req, res) => {
     console.log(`AI reply: ${reply}`);
 
     await saveMessage(conversation.id, 'assistant', reply);
-
-    await supabase
-      .from('leads')
-      .update({ last_message_sent_at: new Date(), bump_sent: false, status: 'vestluses' })
-      .eq('conversation_id', conversation.id);
 
     await twilioClient.messages.create({
       body: reply,
