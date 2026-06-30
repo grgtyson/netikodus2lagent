@@ -11,13 +11,25 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
-async function getSystemPrompt() {
+async function getSetting(key, fallback) {
   const { data } = await supabase
     .from('settings')
     .select('value')
-    .eq('key', 'system_prompt')
+    .eq('key', key)
     .single();
-  return data?.value || 'Sa oled abivalmis assistent.';
+  return data?.value || fallback;
+}
+
+async function getSystemPrompt() {
+  return await getSetting('system_prompt', 'Sa oled abivalmis assistent.');
+}
+
+function renderTemplate(template, vars) {
+  let result = template;
+  for (const [key, value] of Object.entries(vars)) {
+    result = result.replaceAll(`{${key}}`, value || '');
+  }
+  return result;
 }
 
 async function getOrCreateConversation(phoneNumber) {
@@ -129,6 +141,42 @@ app.post('/prompt', async (req, res) => {
   res.json({ success: true });
 });
 
+app.get('/templates', async (req, res) => {
+  const firstMessage = await getSetting('first_message_template', 'Tere, {name}.');
+  const bumpMessage = await getSetting('bump_message_template', 'Tere {name}! Kas jõudsid mu eelmise sõnumiga tutvuda?');
+  const noResponseDelay = await getSetting('no_response_delay_seconds', '3600');
+  res.json({
+    first_message_template: firstMessage,
+    bump_message_template: bumpMessage,
+    no_response_delay_seconds: parseInt(noResponseDelay)
+  });
+});
+
+app.post('/templates', async (req, res) => {
+  const { first_message_template, bump_message_template, no_response_delay_seconds } = req.body;
+
+  if (first_message_template !== undefined) {
+    await supabase
+      .from('settings')
+      .update({ value: first_message_template, updated_at: new Date() })
+      .eq('key', 'first_message_template');
+  }
+  if (bump_message_template !== undefined) {
+    await supabase
+      .from('settings')
+      .update({ value: bump_message_template, updated_at: new Date() })
+      .eq('key', 'bump_message_template');
+  }
+  if (no_response_delay_seconds !== undefined) {
+    await supabase
+      .from('settings')
+      .update({ value: String(no_response_delay_seconds), updated_at: new Date() })
+      .eq('key', 'no_response_delay_seconds');
+  }
+
+  res.json({ success: true });
+});
+
 app.post('/lead', async (req, res) => {
   try {
     console.log('RAW BODY:', JSON.stringify(req.body));
@@ -164,7 +212,8 @@ app.post('/lead', async (req, res) => {
       .eq('id', lead.id);
 
     const firstName = name.split(' ')[0];
-    const reply = `Tere, ${firstName}, Rait, Naps Solar OÜ-st siinpool. Täitsid Facebookis meie päringuvormi. Kas tohin paar küsimust küsida?`;
+    const firstMessageTemplate = await getSetting('first_message_template', 'Tere, {name}.');
+    const reply = renderTemplate(firstMessageTemplate, { name: firstName });
 
     await saveMessage(conversation.id, 'assistant', reply);
 
@@ -208,12 +257,8 @@ app.post('/leads/:id/status', async (req, res) => {
 });
 
 app.get('/settings/bump-delay', async (req, res) => {
-  const { data } = await supabase
-    .from('settings')
-    .select('value')
-    .eq('key', 'bump_delay_seconds')
-    .single();
-  res.json({ seconds: parseInt(data?.value || '3600') });
+  const seconds = await getSetting('bump_delay_seconds', '3600');
+  res.json({ seconds: parseInt(seconds) });
 });
 
 app.post('/settings/bump-delay', async (req, res) => {
@@ -253,7 +298,7 @@ app.post('/sms', async (req, res) => {
 
     await supabase
       .from('leads')
-      .update({ last_message_sent_at: new Date(), bump_sent: false })
+      .update({ last_message_sent_at: new Date(), bump_sent: false, status: 'vestluses' })
       .eq('conversation_id', conversation.id);
 
     await twilioClient.messages.create({
@@ -274,34 +319,27 @@ const PORT = process.env.PORT || 3000;
 
 app.get('/cron/check-bumps', async (req, res) => {
   try {
-    const { data: settingData } = await supabase
-      .from('settings')
-      .select('value')
-      .eq('key', 'bump_delay_seconds')
-      .single();
-    const bumpDelaySeconds = parseInt(settingData?.value || '3600');
+    const bumpDelaySeconds = parseInt(await getSetting('bump_delay_seconds', '3600'));
+    const noResponseDelaySeconds = parseInt(await getSetting('no_response_delay_seconds', '3600'));
+    const bumpMessageTemplate = await getSetting('bump_message_template', 'Tere {name}! Kas jõudsid mu eelmise sõnumiga tutvuda?');
 
-    const { data: leads } = await supabase
+    const now = new Date();
+    let bumpedCount = 0;
+    let noResponseCount = 0;
+
+    const { data: pendingLeads } = await supabase
       .from('leads')
       .select('*')
       .eq('status', 'vestluses')
       .eq('bump_sent', false);
 
-    if (!leads || leads.length === 0) {
-      return res.json({ checked: 0, bumped: 0 });
-    }
-
-    let bumpedCount = 0;
-    const now = new Date();
-
-    for (const lead of leads) {
+    for (const lead of (pendingLeads || [])) {
       if (!lead.last_message_sent_at) continue;
-
-      const lastSent = new Date(lead.last_message_sent_at);
-      const secondsSince = (now - lastSent) / 1000;
+      const secondsSince = (now - new Date(lead.last_message_sent_at)) / 1000;
 
       if (secondsSince >= bumpDelaySeconds) {
-        const bumpMessage = `Tere ${lead.name ? lead.name.split(' ')[0] : ''}! Kas jõudsid mu eelmise sõnumiga tutvuda? Olen siin, kui on küsimusi.`;
+        const firstName = lead.name ? lead.name.split(' ')[0] : '';
+        const bumpMessage = renderTemplate(bumpMessageTemplate, { name: firstName });
 
         await twilioClient.messages.create({
           body: bumpMessage,
@@ -323,7 +361,28 @@ app.get('/cron/check-bumps', async (req, res) => {
       }
     }
 
-    res.json({ checked: leads.length, bumped: bumpedCount });
+    const { data: bumpedLeads } = await supabase
+      .from('leads')
+      .select('*')
+      .eq('status', 'vestluses')
+      .eq('bump_sent', true);
+
+    for (const lead of (bumpedLeads || [])) {
+      if (!lead.last_message_sent_at) continue;
+      const secondsSinceBump = (now - new Date(lead.last_message_sent_at)) / 1000 - bumpDelaySeconds;
+
+      if (secondsSinceBump >= noResponseDelaySeconds) {
+        await supabase
+          .from('leads')
+          .update({ status: 'ei vastanud' })
+          .eq('id', lead.id);
+
+        noResponseCount++;
+        console.log(`Marked as no response: ${lead.phone}`);
+      }
+    }
+
+    res.json({ bumped: bumpedCount, marked_no_response: noResponseCount });
   } catch(err) {
     console.error('Cron bump error:', err);
     res.sendStatus(500);
