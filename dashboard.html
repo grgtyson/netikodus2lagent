@@ -40,14 +40,21 @@
     .empty { flex: 1; display: flex; align-items: center; justify-content: center; color: #333; font-size: 14px; }
     
     /* Prompt */
-    .prompt-page { flex: 1; padding: 32px; display: flex; flex-direction: column; gap: 16px; max-width: 800px; }
+    .prompt-page { flex: 1; padding: 32px; display: flex; flex-direction: column; gap: 16px; max-width: 800px; overflow-y: auto; }
     .prompt-page h2 { font-size: 16px; font-weight: 600; }
     .prompt-page p { font-size: 13px; color: #666; }
-    .prompt-page textarea { flex: 1; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 16px; color: #e8e8e8; font-size: 13px; line-height: 1.6; resize: none; min-height: 300px; font-family: inherit; }
+    .prompt-page textarea { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 16px; color: #e8e8e8; font-size: 13px; line-height: 1.6; resize: vertical; font-family: inherit; }
     .prompt-page textarea:focus { outline: none; border-color: #3b82f6; }
     .save-btn { background: #3b82f6; color: #fff; border: none; padding: 10px 20px; border-radius: 6px; font-size: 13px; cursor: pointer; align-self: flex-start; }
     .save-btn:hover { background: #2563eb; }
     .save-msg { font-size: 12px; color: #22c55e; display: none; }
+
+    .field-block { display: flex; flex-direction: column; gap: 8px; padding-bottom: 20px; border-bottom: 1px solid #1f1f1f; }
+    .field-block:last-of-type { border-bottom: none; }
+    .field-label { font-size: 13px; font-weight: 500; color: #ccc; }
+    .field-hint { font-size: 11px; color: #555; }
+    .field-block textarea { min-height: 80px; }
+    .field-block input[type=number] { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 8px 10px; color: #e8e8e8; font-size: 13px; width: 140px; }
 
     .refresh-btn { background: #1e1e1e; border: 1px solid #2a2a2a; color: #aaa; padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; }
     .refresh-btn:hover { background: #252525; color: #e8e8e8; }
@@ -59,10 +66,6 @@
     .pipeline-page { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
     .pipeline-header { padding: 16px 24px; border-bottom: 1px solid #222; display: flex; align-items: center; justify-content: space-between; }
     .pipeline-header h2 { font-size: 15px; font-weight: 500; }
-    .bump-setting { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #888; }
-    .bump-setting input { width: 70px; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 5px 8px; color: #e8e8e8; font-size: 12px; }
-    .bump-setting button { background: #1e1e1e; border: 1px solid #2a2a2a; color: #aaa; padding: 5px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; }
-    .bump-setting button:hover { background: #252525; color: #e8e8e8; }
 
     .board { flex: 1; display: flex; gap: 12px; padding: 16px 24px; overflow-x: auto; }
     .column { min-width: 240px; flex: 1; display: flex; flex-direction: column; background: #141414; border-radius: 8px; border: 1px solid #1f1f1f; }
@@ -84,6 +87,7 @@
   <div class="tab active" onclick="showTab('pipeline', this)">Leads</div>
   <div class="tab" onclick="showTab('conversations', this)">Vestlused</div>
   <div class="tab" onclick="showTab('prompt', this)">AI Prompt</div>
+  <div class="tab" onclick="showTab('messages-settings', this)">Sõnumid</div>
 </div>
 
 <div class="content">
@@ -93,12 +97,6 @@
     <div class="pipeline-page">
       <div class="pipeline-header">
         <h2>Leads pipeline</h2>
-        <div class="bump-setting">
-          <span>Bump pärast (sek):</span>
-          <input type="number" id="bump-delay-input" value="3600">
-          <button onclick="saveBumpDelay()">Salvesta</button>
-          <span class="save-msg" id="bump-save-msg" style="display:none">✓</span>
-        </div>
       </div>
       <div class="board" id="pipeline-board"></div>
     </div>
@@ -129,10 +127,45 @@
     <div class="prompt-page">
       <h2>AI Prompt</h2>
       <p>See on juhis, mida AI kasutab igal vestlusel. Muuda seda vastavalt oma teenusele.</p>
-      <textarea id="prompt-text" placeholder="Laadin..."></textarea>
+      <textarea id="prompt-text" placeholder="Laadin..." style="min-height:300px"></textarea>
       <div style="display:flex; align-items:center; gap:12px;">
         <button class="save-btn" onclick="savePrompt()">Salvesta</button>
         <span class="save-msg" id="save-msg">✓ Salvestatud</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sõnumite seaded -->
+  <div class="page" id="page-messages-settings">
+    <div class="prompt-page">
+      <h2>Sõnumi mallid ja ajastus</h2>
+      <p>Kasuta {name} kliendi eesnime jaoks. Need seaded juhivad automaatset esimest sõnumit, meeldetuletust ja "ei vastanud" märget.</p>
+
+      <div class="field-block">
+        <span class="field-label">Esimene sõnum (saadetakse kohe pärast vormi täitmist)</span>
+        <textarea id="first-message-text" placeholder="Laadin..."></textarea>
+      </div>
+
+      <div class="field-block">
+        <span class="field-label">Bump sõnum (meeldetuletus, kui klient ei vasta)</span>
+        <textarea id="bump-message-text" placeholder="Laadin..."></textarea>
+      </div>
+
+      <div class="field-block">
+        <span class="field-label">Bump saadetakse pärast (sekundites)</span>
+        <span class="field-hint">Kui kaua oodata esimesest sõnumist enne meeldetuletuse saatmist</span>
+        <input type="number" id="bump-delay-input" value="3600">
+      </div>
+
+      <div class="field-block">
+        <span class="field-label">"Ei vastanud" märgitakse pärast (sekundites)</span>
+        <span class="field-hint">Kui kaua oodata pärast bump sõnumit enne staatuse muutmist</span>
+        <input type="number" id="no-response-delay-input" value="3600">
+      </div>
+
+      <div style="display:flex; align-items:center; gap:12px;">
+        <button class="save-btn" onclick="saveTemplates()">Salvesta</button>
+        <span class="save-msg" id="templates-save-msg">✓ Salvestatud</span>
       </div>
     </div>
   </div>
@@ -159,7 +192,8 @@
     el.classList.add('active');
     document.getElementById('page-' + tab).classList.add('active');
     if (tab === 'prompt') loadPrompt();
-    if (tab === 'pipeline') { loadLeads(); loadBumpDelay(); }
+    if (tab === 'pipeline') loadLeads();
+    if (tab === 'messages-settings') loadTemplates();
   }
 
   async function loadLeads() {
@@ -226,20 +260,36 @@
     loadLeads();
   }
 
-  async function loadBumpDelay() {
-    const res = await fetch(`${API}/settings/bump-delay`);
+  async function loadTemplates() {
+    const res = await fetch(`${API}/templates`);
     const data = await res.json();
-    document.getElementById('bump-delay-input').value = data.seconds;
+    document.getElementById('first-message-text').value = data.first_message_template;
+    document.getElementById('bump-message-text').value = data.bump_message_template;
+    document.getElementById('no-response-delay-input').value = data.no_response_delay_seconds;
+    const bumpRes = await fetch(`${API}/settings/bump-delay`);
+    const bumpData = await bumpRes.json();
+    document.getElementById('bump-delay-input').value = bumpData.seconds;
   }
 
-  async function saveBumpDelay() {
-    const seconds = document.getElementById('bump-delay-input').value;
+  async function saveTemplates() {
+    const first_message_template = document.getElementById('first-message-text').value;
+    const bump_message_template = document.getElementById('bump-message-text').value;
+    const no_response_delay_seconds = parseInt(document.getElementById('no-response-delay-input').value);
+    const bumpDelaySeconds = parseInt(document.getElementById('bump-delay-input').value);
+
+    await fetch(`${API}/templates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ first_message_template, bump_message_template, no_response_delay_seconds })
+    });
+
     await fetch(`${API}/settings/bump-delay`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ seconds: parseInt(seconds) })
+      body: JSON.stringify({ seconds: bumpDelaySeconds })
     });
-    const msg = document.getElementById('bump-save-msg');
+
+    const msg = document.getElementById('templates-save-msg');
     msg.style.display = 'inline';
     setTimeout(() => msg.style.display = 'none', 2000);
   }
@@ -311,7 +361,6 @@
   }
 
   loadLeads();
-  loadBumpDelay();
   loadConversations();
   setInterval(() => {
     loadConversations();
