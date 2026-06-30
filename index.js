@@ -271,4 +271,63 @@ app.post('/sms', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+
+app.get('/cron/check-bumps', async (req, res) => {
+  try {
+    const { data: settingData } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('key', 'bump_delay_seconds')
+      .single();
+    const bumpDelaySeconds = parseInt(settingData?.value || '3600');
+
+    const { data: leads } = await supabase
+      .from('leads')
+      .select('*')
+      .eq('status', 'vestluses')
+      .eq('bump_sent', false);
+
+    if (!leads || leads.length === 0) {
+      return res.json({ checked: 0, bumped: 0 });
+    }
+
+    let bumpedCount = 0;
+    const now = new Date();
+
+    for (const lead of leads) {
+      if (!lead.last_message_sent_at) continue;
+
+      const lastSent = new Date(lead.last_message_sent_at);
+      const secondsSince = (now - lastSent) / 1000;
+
+      if (secondsSince >= bumpDelaySeconds) {
+        const bumpMessage = `Tere ${lead.name ? lead.name.split(' ')[0] : ''}! Kas jõudsid mu eelmise sõnumiga tutvuda? Olen siin, kui on küsimusi.`;
+
+        await twilioClient.messages.create({
+          body: bumpMessage,
+          from: process.env.TWILIO_PHONE_NUMBER,
+          to: lead.phone
+        });
+
+        if (lead.conversation_id) {
+          await saveMessage(lead.conversation_id, 'assistant', bumpMessage);
+        }
+
+        await supabase
+          .from('leads')
+          .update({ bump_sent: true })
+          .eq('id', lead.id);
+
+        bumpedCount++;
+        console.log(`Bump sent to ${lead.phone}`);
+      }
+    }
+
+    res.json({ checked: leads.length, bumped: bumpedCount });
+  } catch(err) {
+    console.error('Cron bump error:', err);
+    res.sendStatus(500);
+  }
+});
+
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
