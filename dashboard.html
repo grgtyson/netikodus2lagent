@@ -28,8 +28,16 @@
     .conv-time { font-size: 11px; color: #444; margin-top: 4px; }
     
     .main { flex: 1; display: flex; flex-direction: column; }
-    .main-header { padding: 16px 24px; border-bottom: 1px solid #222; display: flex; align-items: center; justify-content: space-between; }
+    .main-header { padding: 16px 24px; border-bottom: 1px solid #222; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .main-header h2 { font-size: 15px; font-weight: 500; }
+    .header-actions { display: flex; align-items: center; gap: 8px; }
+    .ai-status { font-size: 11px; padding: 4px 10px; border-radius: 20px; }
+    .ai-status.on { background: #14321d; color: #4ade80; }
+    .ai-status.off { background: #3a1d1d; color: #f87171; }
+    .takeover-btn { background: #1e1e1e; border: 1px solid #2a2a2a; color: #ccc; padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+    .takeover-btn:hover { background: #252525; }
+    .takeover-btn.active { background: #3a1d1d; border-color: #5a2a2a; color: #f87171; }
+
     .messages { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 12px; }
     .msg-wrap { display: flex; flex-direction: column; }
     .msg-wrap.assistant { align-items: flex-end; }
@@ -38,6 +46,14 @@
     .msg.assistant { background: #1d3a6e; }
     .msg-meta { font-size: 11px; color: #444; margin-top: 4px; }
     .empty { flex: 1; display: flex; align-items: center; justify-content: center; color: #333; font-size: 14px; }
+
+    .send-bar { display: flex; gap: 8px; padding: 16px 24px; border-top: 1px solid #222; }
+    .send-bar input { flex: 1; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 10px 14px; color: #e8e8e8; font-size: 13px; }
+    .send-bar input:focus { outline: none; border-color: #3b82f6; }
+    .send-bar input:disabled { opacity: 0.4; cursor: not-allowed; }
+    .send-bar button { background: #3b82f6; color: #fff; border: none; padding: 10px 18px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+    .send-bar button:hover { background: #2563eb; }
+    .send-bar button:disabled { background: #2a2a2a; color: #666; cursor: not-allowed; }
     
     /* Prompt */
     .prompt-page { flex: 1; padding: 32px; display: flex; flex-direction: column; gap: 16px; max-width: 800px; overflow-y: auto; }
@@ -114,10 +130,18 @@
     <div class="main">
       <div class="main-header">
         <h2 id="active-phone">Vali vestlus</h2>
-        <button class="refresh-btn" onclick="loadConversations()">↻ Uuenda</button>
+        <div class="header-actions" id="header-actions" style="display:none">
+          <span class="ai-status on" id="ai-status">AI aktiivne</span>
+          <button class="takeover-btn" id="takeover-btn" onclick="toggleTakeover()">Võta üle</button>
+          <button class="refresh-btn" onclick="loadConversations()">↻ Uuenda</button>
+        </div>
       </div>
       <div class="messages" id="messages">
         <div class="empty">Vali vasakult vestlus</div>
+      </div>
+      <div class="send-bar" id="send-bar" style="display:none">
+        <input type="text" id="manual-message-input" placeholder="Kirjuta sõnum kliendile..." onkeydown="if(event.key==='Enter') sendManualMessage()">
+        <button onclick="sendManualMessage()">Saada</button>
       </div>
     </div>
   </div>
@@ -315,6 +339,11 @@
         div.onclick = () => showConversation(conv.id, div);
         list.appendChild(div);
       });
+
+      if (activeId) {
+        const stillActive = conversations.find(c => c.id === activeId);
+        if (stillActive) updateTakeoverUI(stillActive);
+      }
     } catch(e) {
       console.error(e);
     }
@@ -327,6 +356,11 @@
     document.querySelectorAll('.conv-item').forEach(e => e.classList.remove('active'));
     el.classList.add('active');
     document.getElementById('active-phone').textContent = `+${conv.phone_number}`;
+    document.getElementById('header-actions').style.display = 'flex';
+    document.getElementById('send-bar').style.display = 'flex';
+
+    updateTakeoverUI(conv);
+
     const msgs = conv.messages || [];
     const container = document.getElementById('messages');
     if (msgs.length === 0) {
@@ -340,6 +374,54 @@
       </div>
     `).join('');
     container.scrollTop = container.scrollHeight;
+  }
+
+  function updateTakeoverUI(conv) {
+    const aiEnabled = conv.ai_enabled !== false;
+    const statusEl = document.getElementById('ai-status');
+    const btnEl = document.getElementById('takeover-btn');
+    if (aiEnabled) {
+      statusEl.textContent = 'AI aktiivne';
+      statusEl.className = 'ai-status on';
+      btnEl.textContent = 'Võta üle';
+      btnEl.className = 'takeover-btn';
+    } else {
+      statusEl.textContent = 'Käsitsi režiim';
+      statusEl.className = 'ai-status off';
+      btnEl.textContent = 'Anna AI-le tagasi';
+      btnEl.className = 'takeover-btn active';
+    }
+  }
+
+  async function toggleTakeover() {
+    if (!activeId) return;
+    const conv = conversations.find(c => c.id === activeId);
+    const newState = !(conv.ai_enabled !== false);
+    await fetch(`${API}/conversations/${activeId}/toggle-ai`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ai_enabled: newState })
+    });
+    conv.ai_enabled = newState;
+    updateTakeoverUI(conv);
+  }
+
+  async function sendManualMessage() {
+    const input = document.getElementById('manual-message-input');
+    const message = input.value.trim();
+    if (!message || !activeId) return;
+
+    input.disabled = true;
+    await fetch(`${API}/conversations/${activeId}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message })
+    });
+    input.value = '';
+    input.disabled = false;
+    await loadConversations();
+    const el = [...document.querySelectorAll('.conv-item')].find(e => e.dataset.id === activeId);
+    if (el) showConversation(activeId, el);
   }
 
   async function loadPrompt() {
