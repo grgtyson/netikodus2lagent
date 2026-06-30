@@ -133,7 +133,7 @@ app.post('/lead', async (req, res) => {
   try {
     console.log('RAW BODY:', JSON.stringify(req.body));
 
-const name = req.body['Nimi'];
+    const name = req.body['Nimi'];
     const phone = req.body['Telefon'];
     const client_type = req.body['Klienditüüp'];
     const extra_info = req.body['Lisainfo'];
@@ -163,22 +163,9 @@ const name = req.body['Nimi'];
       .update({ conversation_id: conversation.id })
       .eq('id', lead.id);
 
-    const systemPrompt = await getSystemPrompt();
-    const clientTypeText = {
-      'Koju': 'eramaja',
-      'Korteriühistusse': 'korteriühistu',
-      'Kontorisse': 'kontor/ettevõte'
-    }[client_type] || client_type;
+    const firstName = name.split(' ')[0];
+    const reply = `Tere, ${firstName}, Rait, Naps Solar OÜ-st siinpool. Täitsid Facebookis meie päringuvormi. Kas tohin paar küsimust küsida?`;
 
-    const firstMessage = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Klient täitis veebivormi. Nimi: ${name}. Tüüp: ${clientTypeText}. Lisainfo: ${extra_info || 'puudub'}. Alusta vestlust sõbraliku tervitusega ja esimese kvalifitseeriva küsimusega.` }
-      ]
-    });
-
-    const reply = firstMessage.choices[0].message.content;
     await saveMessage(conversation.id, 'assistant', reply);
 
     await twilioClient.messages.create({
