@@ -190,6 +190,41 @@ app.post('/lead', async (req, res) => {
   }
 });
 
+app.get('/leads', async (req, res) => {
+  const { data } = await supabase
+    .from('leads')
+    .select('*, conversations(*, messages(*))')
+    .order('created_at', { ascending: false });
+  res.json(data);
+});
+
+app.post('/leads/:id/status', async (req, res) => {
+  const { status } = req.body;
+  await supabase
+    .from('leads')
+    .update({ status })
+    .eq('id', req.params.id);
+  res.json({ success: true });
+});
+
+app.get('/settings/bump-delay', async (req, res) => {
+  const { data } = await supabase
+    .from('settings')
+    .select('value')
+    .eq('key', 'bump_delay_seconds')
+    .single();
+  res.json({ seconds: parseInt(data?.value || '3600') });
+});
+
+app.post('/settings/bump-delay', async (req, res) => {
+  const { seconds } = req.body;
+  await supabase
+    .from('settings')
+    .update({ value: String(seconds) })
+    .eq('key', 'bump_delay_seconds');
+  res.json({ success: true });
+});
+
 app.post('/sms', async (req, res) => {
   const from = req.body.From;
   const text = req.body.Body;
