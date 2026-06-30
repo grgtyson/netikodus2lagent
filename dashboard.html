@@ -54,18 +54,58 @@
 
     .page { display: none; }
     .page.active { display: flex; flex: 1; overflow: hidden; }
+
+    /* Pipeline */
+    .pipeline-page { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .pipeline-header { padding: 16px 24px; border-bottom: 1px solid #222; display: flex; align-items: center; justify-content: space-between; }
+    .pipeline-header h2 { font-size: 15px; font-weight: 500; }
+    .bump-setting { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #888; }
+    .bump-setting input { width: 70px; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 5px 8px; color: #e8e8e8; font-size: 12px; }
+    .bump-setting button { background: #1e1e1e; border: 1px solid #2a2a2a; color: #aaa; padding: 5px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+    .bump-setting button:hover { background: #252525; color: #e8e8e8; }
+
+    .board { flex: 1; display: flex; gap: 12px; padding: 16px 24px; overflow-x: auto; }
+    .column { min-width: 240px; flex: 1; display: flex; flex-direction: column; background: #141414; border-radius: 8px; border: 1px solid #1f1f1f; }
+    .column-header { padding: 12px 14px; border-bottom: 1px solid #1f1f1f; font-size: 12px; font-weight: 600; color: #aaa; display: flex; justify-content: space-between; }
+    .column-count { color: #555; }
+    .column-body { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 60px; }
+    .lead-card { background: #1c1c1c; border: 1px solid #2a2a2a; border-radius: 8px; padding: 10px 12px; cursor: pointer; }
+    .lead-card:hover { border-color: #3a3a3a; }
+    .lead-name { font-size: 13px; font-weight: 500; }
+    .lead-phone { font-size: 11px; color: #666; margin-top: 2px; }
+    .lead-type { display: inline-block; font-size: 10px; color: #60a5fa; background: #1d3a6e; padding: 2px 6px; border-radius: 10px; margin-top: 6px; }
+    .lead-time { font-size: 10px; color: #444; margin-top: 6px; }
+    .lead-status-select { width: 100%; margin-top: 8px; background: #161616; border: 1px solid #2a2a2a; border-radius: 6px; color: #ccc; font-size: 11px; padding: 4px 6px; }
   </style>
 </head>
 <body>
 
 <div class="topbar">
-  <div class="tab active" onclick="showTab('conversations', this)">Vestlused</div>
+  <div class="tab active" onclick="showTab('pipeline', this)">Leads</div>
+  <div class="tab" onclick="showTab('conversations', this)">Vestlused</div>
   <div class="tab" onclick="showTab('prompt', this)">AI Prompt</div>
 </div>
 
 <div class="content">
+
+  <!-- Pipeline -->
+  <div class="page active" id="page-pipeline">
+    <div class="pipeline-page">
+      <div class="pipeline-header">
+        <h2>Leads pipeline</h2>
+        <div class="bump-setting">
+          <span>Bump pärast (sek):</span>
+          <input type="number" id="bump-delay-input" value="3600">
+          <button onclick="saveBumpDelay()">Salvesta</button>
+          <span class="save-msg" id="bump-save-msg" style="display:none">✓</span>
+        </div>
+      </div>
+      <div class="board" id="pipeline-board"></div>
+    </div>
+  </div>
+
   <!-- Vestlused -->
-  <div class="page active" id="page-conversations">
+  <div class="page" id="page-conversations">
     <div class="sidebar">
       <div class="sidebar-header">
         <h1>Vestlused</h1>
@@ -101,7 +141,17 @@
 <script>
   const API = window.location.origin;
   let conversations = [];
+  let leads = [];
   let activeId = null;
+
+  const STATUSES = [
+    { key: 'uus', label: 'Uus' },
+    { key: 'vestluses', label: 'Vestluses' },
+    { key: 'kvalifitseeritud', label: 'Kvalifitseeritud' },
+    { key: 'üle antud', label: 'Üle antud müügile' },
+    { key: 'ei vastanud', label: 'Ei vastanud' },
+    { key: 'mittehuvitatud', label: 'Mittehuvitatud' }
+  ];
 
   function showTab(tab, el) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -109,6 +159,89 @@
     el.classList.add('active');
     document.getElementById('page-' + tab).classList.add('active');
     if (tab === 'prompt') loadPrompt();
+    if (tab === 'pipeline') { loadLeads(); loadBumpDelay(); }
+  }
+
+  async function loadLeads() {
+    try {
+      const res = await fetch(`${API}/leads`);
+      leads = await res.json();
+      renderBoard();
+    } catch(e) {
+      console.error(e);
+    }
+  }
+
+  function renderBoard() {
+    const board = document.getElementById('pipeline-board');
+    board.innerHTML = '';
+    STATUSES.forEach(s => {
+      const col = document.createElement('div');
+      col.className = 'column';
+      const colLeads = leads.filter(l => l.status === s.key);
+      col.innerHTML = `
+        <div class="column-header">
+          <span>${s.label}</span>
+          <span class="column-count">${colLeads.length}</span>
+        </div>
+        <div class="column-body" id="col-${s.key}"></div>
+      `;
+      board.appendChild(col);
+    });
+
+    leads.forEach(lead => {
+      const col = document.getElementById(`col-${lead.status}`);
+      if (!col) return;
+      const card = document.createElement('div');
+      card.className = 'lead-card';
+      card.innerHTML = `
+        <div class="lead-name">${lead.name || 'Tundmatu'}</div>
+        <div class="lead-phone">${lead.phone}</div>
+        <div class="lead-type">${lead.client_type || ''}</div>
+        <div class="lead-time">${new Date(lead.created_at).toLocaleString('et-EE')}</div>
+        <select class="lead-status-select" onchange="updateStatus('${lead.id}', this.value)">
+          ${STATUSES.map(st => `<option value="${st.key}" ${st.key === lead.status ? 'selected' : ''}>${st.label}</option>`).join('')}
+        </select>
+      `;
+      card.querySelector('select').addEventListener('click', e => e.stopPropagation());
+      card.onclick = () => {
+        if (lead.conversation_id) {
+          showTab('conversations', document.querySelectorAll('.tab')[1]);
+          setTimeout(() => {
+            const convEl = [...document.querySelectorAll('.conv-item')].find(el => el.dataset.id === lead.conversation_id);
+            if (convEl) convEl.click();
+          }, 200);
+        }
+      };
+      col.appendChild(card);
+    });
+  }
+
+  async function updateStatus(leadId, status) {
+    await fetch(`${API}/leads/${leadId}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    });
+    loadLeads();
+  }
+
+  async function loadBumpDelay() {
+    const res = await fetch(`${API}/settings/bump-delay`);
+    const data = await res.json();
+    document.getElementById('bump-delay-input').value = data.seconds;
+  }
+
+  async function saveBumpDelay() {
+    const seconds = document.getElementById('bump-delay-input').value;
+    await fetch(`${API}/settings/bump-delay`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seconds: parseInt(seconds) })
+    });
+    const msg = document.getElementById('bump-save-msg');
+    msg.style.display = 'inline';
+    setTimeout(() => msg.style.display = 'none', 2000);
   }
 
   async function loadConversations() {
@@ -123,6 +256,7 @@
         const last = msgs[msgs.length - 1];
         const div = document.createElement('div');
         div.className = 'conv-item' + (conv.id === activeId ? ' active' : '');
+        div.dataset.id = conv.id;
         div.innerHTML = `
           <div class="conv-phone">+${conv.phone_number}</div>
           <div class="conv-preview">${last ? last.content : 'Sõnumeid pole'}</div>
@@ -176,8 +310,13 @@
     setTimeout(() => msg.style.display = 'none', 3000);
   }
 
+  loadLeads();
+  loadBumpDelay();
   loadConversations();
-  setInterval(loadConversations, 30000);
+  setInterval(() => {
+    loadConversations();
+    if (document.getElementById('page-pipeline').classList.contains('active')) loadLeads();
+  }, 30000);
 </script>
 
 </body>
