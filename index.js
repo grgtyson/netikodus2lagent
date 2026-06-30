@@ -133,10 +133,10 @@ app.post('/lead', async (req, res) => {
   try {
     console.log('RAW BODY:', JSON.stringify(req.body));
 
-    const name = req.body.name;
-    const phone = req.body.telf;
-    const client_type = req.body.client_type;
-    const extra_info = req.body.additional_info;
+const name = req.body['Nimi'];
+    const phone = req.body['Telefon'];
+    const client_type = req.body['Klienditüüp'];
+    const extra_info = req.body['Lisainfo'];
 
     console.log(`New lead: ${name} (${phone}) - ${client_type}`);
 
