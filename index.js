@@ -377,12 +377,14 @@ app.get('/cron/check-bumps', async (req, res) => {
 
     const { data: pendingLeads } = await supabase
       .from('leads')
-      .select('*')
+      .select('*, conversations(ai_enabled)')
       .eq('status', 'vestluses')
       .eq('bump_sent', false);
 
     for (const lead of (pendingLeads || [])) {
       if (!lead.last_message_sent_at) continue;
+      if (lead.conversations && lead.conversations.ai_enabled === false) continue;
+
       const secondsSince = (now - new Date(lead.last_message_sent_at)) / 1000;
 
       if (secondsSince >= bumpDelaySeconds) {
@@ -411,12 +413,14 @@ app.get('/cron/check-bumps', async (req, res) => {
 
     const { data: bumpedLeads } = await supabase
       .from('leads')
-      .select('*')
+      .select('*, conversations(ai_enabled)')
       .eq('status', 'vestluses')
       .eq('bump_sent', true);
 
     for (const lead of (bumpedLeads || [])) {
       if (!lead.last_message_sent_at) continue;
+      if (lead.conversations && lead.conversations.ai_enabled === false) continue;
+
       const secondsSinceBump = (now - new Date(lead.last_message_sent_at)) / 1000 - bumpDelaySeconds;
 
       if (secondsSinceBump >= noResponseDelaySeconds) {
