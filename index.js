@@ -20,6 +20,12 @@ async function getSetting(key, fallback) {
   return data?.value || fallback;
 }
 
+async function setSetting(key, value) {
+  await supabase
+    .from('settings')
+    .upsert({ key, value }, { onConflict: 'key' });
+}
+
 async function getSystemPrompt() {
   return await getSetting('system_prompt', 'Sa oled abivalmis assistent.');
 }
@@ -176,10 +182,7 @@ app.get('/prompt', async (req, res) => {
 
 app.post('/prompt', async (req, res) => {
   const { prompt } = req.body;
-  await supabase
-    .from('settings')
-    .update({ value: prompt, updated_at: new Date() })
-    .eq('key', 'system_prompt');
+  await setSetting('system_prompt', prompt);
   res.json({ success: true });
 });
 
@@ -196,26 +199,9 @@ app.get('/templates', async (req, res) => {
 
 app.post('/templates', async (req, res) => {
   const { first_message_template, bump_message_template, no_response_delay_seconds } = req.body;
-
-  if (first_message_template !== undefined) {
-    await supabase
-      .from('settings')
-      .update({ value: first_message_template, updated_at: new Date() })
-      .eq('key', 'first_message_template');
-  }
-  if (bump_message_template !== undefined) {
-    await supabase
-      .from('settings')
-      .update({ value: bump_message_template, updated_at: new Date() })
-      .eq('key', 'bump_message_template');
-  }
-  if (no_response_delay_seconds !== undefined) {
-    await supabase
-      .from('settings')
-      .update({ value: String(no_response_delay_seconds), updated_at: new Date() })
-      .eq('key', 'no_response_delay_seconds');
-  }
-
+  if (first_message_template !== undefined) await setSetting('first_message_template', first_message_template);
+  if (bump_message_template !== undefined) await setSetting('bump_message_template', bump_message_template);
+  if (no_response_delay_seconds !== undefined) await setSetting('no_response_delay_seconds', String(no_response_delay_seconds));
   res.json({ success: true });
 });
 
@@ -305,10 +291,7 @@ app.get('/settings/bump-delay', async (req, res) => {
 
 app.post('/settings/bump-delay', async (req, res) => {
   const { seconds } = req.body;
-  await supabase
-    .from('settings')
-    .update({ value: String(seconds) })
-    .eq('key', 'bump_delay_seconds');
+  await setSetting('bump_delay_seconds', String(seconds));
   res.json({ success: true });
 });
 
