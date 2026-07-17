@@ -414,6 +414,7 @@ app.get('/cron/check-bumps', async (req, res) => {
       }
     }
 
+    
     const { data: bumpedLeads } = await supabase
       .from('leads')
       .select('*, conversations(ai_enabled)')
