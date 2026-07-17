@@ -209,12 +209,32 @@ app.post('/lead', async (req, res) => {
   try {
     console.log('RAW BODY:', JSON.stringify(req.body));
 
-    const name = req.body['Nimi'];
-    const phone = req.body['Telefon'];
-    const client_type = req.body['Klienditüüp'];
-    const extra_info = req.body['Lisainfo'];
+    const name = req.body['name'] || req.body['Nimi'];
+    const phone = req.body['telf'] || req.body['Telefon'];
+    const email = req.body['epost'] || req.body['Email'] || '';
+    const address = req.body['field_edac53c'] || req.body['Aadress'] || '';
+    const clientType = req.body['field_38b7809'] || req.body['Klienditüüp'] || '';
+    const productType = req.body['field_c671f4d'] || '';
+    const installationType = req.body['field_d3194c1'] || '';
+    const roofType = req.body['field_b4f31ef'] || '';
+    const companyName = req.body['Ettevõtte nimi'] || '';
+    const extraInfo = req.body['Lisainfo'] || '';
 
-    console.log(`New lead: ${name} (${phone}) - ${client_type}`);
+    const extra_info = [
+      productType ? `Soovib: ${productType}` : '',
+      installationType ? `Paigaldus: ${installationType}` : '',
+      roofType ? `Katus: ${roofType}` : '',
+      address ? `Aadress: ${address}` : '',
+      companyName ? `Ettevõte: ${companyName}` : '',
+      extraInfo ? `Lisainfo: ${extraInfo}` : ''
+    ].filter(Boolean).join(', ');
+
+    console.log(`New lead: ${name} (${phone}) - ${clientType} - ${extra_info}`);
+
+    if (!phone) {
+      console.error('No phone number provided');
+      return res.sendStatus(400);
+    }
 
     let cleanPhone = phone.replace(/\s+/g, '');
     if (!cleanPhone.startsWith('+')) {
@@ -226,7 +246,7 @@ app.post('/lead', async (req, res) => {
       .insert({
         name,
         phone: cleanPhone,
-        client_type,
+        client_type: clientType,
         extra_info,
         status: 'uus'
       })
@@ -239,7 +259,7 @@ app.post('/lead', async (req, res) => {
       .update({ conversation_id: conversation.id })
       .eq('id', lead.id);
 
-    const firstName = name.split(' ')[0];
+    const firstName = name ? name.split(' ')[0] : '';
     const firstMessageTemplate = await getSetting('first_message_template', 'Tere, {name}.');
     const reply = renderTemplate(firstMessageTemplate, { name: firstName });
 
