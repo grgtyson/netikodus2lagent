@@ -39,20 +39,20 @@ function renderTemplate(template, vars) {
 }
 
 async function getOrCreateConversation(phoneNumber) {
-  let { data } = await supabase
+  const { data, error } = await supabase
     .from('conversations')
     .select('*')
     .eq('phone_number', phoneNumber)
+    .maybeSingle();
+
+  if (data) return data;
+
+  const { data: newConv } = await supabase
+    .from('conversations')
+    .insert({ phone_number: phoneNumber })
+    .select()
     .single();
-  if (!data) {
-    const { data: newConv } = await supabase
-      .from('conversations')
-      .insert({ phone_number: phoneNumber })
-      .select()
-      .single();
-    data = newConv;
-  }
-  return data;
+  return newConv;
 }
 
 async function getMessages(conversationId) {
