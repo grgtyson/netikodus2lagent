@@ -209,14 +209,14 @@ app.post('/lead', async (req, res) => {
   try {
     console.log('RAW BODY:', JSON.stringify(req.body));
 
-    const name = req.body['name'] || req.body['Nimi'];
-    const phone = req.body['telf'] || req.body['Telefon'];
-    const email = req.body['epost'] || req.body['Email'] || '';
-    const address = req.body['field_edac53c'] || req.body['Aadress'] || '';
-    const clientType = req.body['field_38b7809'] || req.body['Klienditüüp'] || '';
-    const productType = req.body['field_c671f4d'] || '';
-    const installationType = req.body['field_d3194c1'] || '';
-    const roofType = req.body['field_b4f31ef'] || '';
+    const name = req.body['Täisnimi'] || req.body['name'] || req.body['Nimi'];
+    const phone = req.body['Telefon'] || req.body['telf'];
+    const email = req.body['E-post'] || req.body['epost'] || '';
+    const address = req.body['Aadress'] || req.body['field_edac53c'] || '';
+    const clientType = req.body['Soovin päikesepaneele/akut:'] || req.body['field_38b7809'] || req.body['Klienditüüp'] || '';
+    const productType = req.body['Kas soovid päikesepaneele, akut või mõlemat?'] || req.body['field_c671f4d'] || '';
+    const installationType = req.body['Kas soovite maa- või katusepaigaldust?'] || req.body['field_d3194c1'] || '';
+    const roofType = req.body['Kas tegemist on viil- või lamekatusega?'] || req.body['field_b4f31ef'] || '';
     const companyName = req.body['Ettevõtte nimi'] || '';
     const extraInfo = req.body['Lisainfo'] || '';
 
@@ -414,7 +414,6 @@ app.get('/cron/check-bumps', async (req, res) => {
       }
     }
 
-    
     const { data: bumpedLeads } = await supabase
       .from('leads')
       .select('*, conversations(ai_enabled)')
