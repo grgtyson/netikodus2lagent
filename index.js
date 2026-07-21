@@ -4,6 +4,8 @@ const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
 const twilio = require('twilio');
 const axios = require('axios');
+const multer = require('multer');
+const upload = multer();
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -12,7 +14,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
-const SMS_PROVIDER = process.env.SMS_PROVIDER || 'twilio'; // 'twilio' or 'textmagic'
+const SMS_PROVIDER = process.env.SMS_PROVIDER || 'twilio';
 
 async function sendSMS(to, body) {
   if (SMS_PROVIDER === 'textmagic') {
@@ -98,6 +100,39 @@ async function saveMessage(conversationId, role, content) {
     .insert({ conversation_id: conversationId, role, content });
 }
 
+async function handleInboundSMS(from, text, res) {
+  try {
+    const conversation = await getOrCreateConversation(from);
+    await saveMessage(conversation.id, 'user', text);
+
+    await supabase
+      .from('leads')
+      .update({ last_message_sent_at: new Date(), bump_sent: false, status: 'vestluses' })
+      .eq('conversation_id', conversation.id);
+
+    if (conversation.ai_enabled === false) {
+      console.log('AI disabled, skipping auto-reply');
+      return res.sendStatus(200);
+    }
+
+    const history = await getMessages(conversation.id);
+    const chatHistory = history.map(m => ({ role: m.role, content: m.content }));
+    const systemPrompt = await getSystemPrompt();
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'system', content: systemPrompt }, ...chatHistory]
+    });
+    const reply = response.choices[0].message.content;
+    await saveMessage(conversation.id, 'assistant', reply);
+    await sendSMS(from, reply);
+    console.log('SMS sent successfully');
+    res.sendStatus(200);
+  } catch(err) {
+    console.error('Inbound SMS handler error:', err);
+    res.sendStatus(500);
+  }
+}
+
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
@@ -150,45 +185,13 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// Textmagic inbound webhook
-app.post('/sms-textmagic', async (req, res) => {
-  console.log('Textmagic inbound:', JSON.stringify(req.body));
-  const from = req.body.from || req.body.phone;
-  const text = req.body.text || req.body.message;
-
-  if (!from || !text) return res.sendStatus(200);
-
+app.post('/sms-textmagic', upload.none(), async (req, res) => {
+  console.log('Textmagic inbound raw:', JSON.stringify(req.body));
+  const from = req.body.from || req.body.phone || req.body.sender;
+  const text = req.body.text || req.body.message || req.body.body;
   console.log(`Textmagic SMS from ${from}: ${text}`);
-  try {
-    const conversation = await getOrCreateConversation(from);
-    await saveMessage(conversation.id, 'user', text);
-
-    await supabase
-      .from('leads')
-      .update({ last_message_sent_at: new Date(), bump_sent: false, status: 'vestluses' })
-      .eq('conversation_id', conversation.id);
-
-    if (conversation.ai_enabled === false) {
-      console.log('AI disabled, skipping auto-reply');
-      return res.sendStatus(200);
-    }
-
-    const history = await getMessages(conversation.id);
-    const chatHistory = history.map(m => ({ role: m.role, content: m.content }));
-    const systemPrompt = await getSystemPrompt();
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'system', content: systemPrompt }, ...chatHistory]
-    });
-    const reply = response.choices[0].message.content;
-    await saveMessage(conversation.id, 'assistant', reply);
-    await sendSMS(from, reply);
-    console.log('SMS sent successfully');
-    res.sendStatus(200);
-  } catch(err) {
-    console.error('Textmagic SMS handler error:', err);
-    res.sendStatus(500);
-  }
+  if (!from || !text) return res.sendStatus(200);
+  await handleInboundSMS(from, text, res);
 });
 
 app.get('/conversations', async (req, res) => {
@@ -366,43 +369,8 @@ app.post('/sms', async (req, res) => {
   const from = req.body.From;
   const text = req.body.Body;
   console.log(`SMS from ${from}: ${text}`);
-  try {
-    const conversation = await getOrCreateConversation(from);
-    console.log(`Conversation ID: ${conversation.id}`);
-
-    await saveMessage(conversation.id, 'user', text);
-    console.log('User message saved');
-
-    await supabase
-      .from('leads')
-      .update({ last_message_sent_at: new Date(), bump_sent: false, status: 'vestluses' })
-      .eq('conversation_id', conversation.id);
-
-    if (conversation.ai_enabled === false) {
-      console.log('AI disabled for this conversation, skipping auto-reply');
-      return res.sendStatus(200);
-    }
-
-    const history = await getMessages(conversation.id);
-    const chatHistory = history.map(m => ({ role: m.role, content: m.content }));
-    const systemPrompt = await getSystemPrompt();
-    console.log(`History length: ${chatHistory.length}`);
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'system', content: systemPrompt }, ...chatHistory]
-    });
-    const reply = response.choices[0].message.content;
-    console.log(`AI reply: ${reply}`);
-
-    await saveMessage(conversation.id, 'assistant', reply);
-    await sendSMS(from, reply);
-
-    console.log('SMS sent successfully');
-    res.sendStatus(200);
-  } catch(err) {
-    console.error('SMS handler error:', err);
-    res.sendStatus(500);
-  }
+  if (!from || !text) return res.sendStatus(200);
+  await handleInboundSMS(from, text, res);
 });
 
 const PORT = process.env.PORT || 3000;
