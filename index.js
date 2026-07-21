@@ -3,6 +3,7 @@ const express = require('express');
 const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
 const twilio = require('twilio');
+const axios = require('axios');
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -10,6 +11,33 @@ app.use(express.static(__dirname));
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+
+const SMS_PROVIDER = process.env.SMS_PROVIDER || 'twilio'; // 'twilio' or 'textmagic'
+
+async function sendSMS(to, body) {
+  if (SMS_PROVIDER === 'textmagic') {
+    const response = await axios.post(
+      'https://rest.textmagic.com/api/v2/messages',
+      { text: body, phones: to },
+      {
+        auth: {
+          username: process.env.TEXTMAGIC_USERNAME,
+          password: process.env.TEXTMAGIC_TOKEN
+        }
+      }
+    );
+    console.log(`Textmagic SMS sent to ${to}:`, response.data);
+    return response.data;
+  } else {
+    const msg = await twilioClient.messages.create({
+      body,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      to
+    });
+    console.log(`Twilio SMS sent to ${to}:`, msg.sid);
+    return msg;
+  }
+}
 
 async function getSetting(key, fallback) {
   const { data } = await supabase
@@ -39,7 +67,7 @@ function renderTemplate(template, vars) {
 }
 
 async function getOrCreateConversation(phoneNumber) {
-  const { data, error } = await supabase
+  const { data } = await supabase
     .from('conversations')
     .select('*')
     .eq('phone_number', phoneNumber)
@@ -97,10 +125,7 @@ app.post('/webhook', async (req, res) => {
       const systemPrompt = await getSystemPrompt();
       const response = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          ...chatHistory
-        ]
+        messages: [{ role: 'system', content: systemPrompt }, ...chatHistory]
       });
       const reply = response.choices[0].message.content;
       await saveMessage(conversation.id, 'assistant', reply);
@@ -122,6 +147,47 @@ app.post('/webhook', async (req, res) => {
     res.sendStatus(200);
   } else {
     res.sendStatus(404);
+  }
+});
+
+// Textmagic inbound webhook
+app.post('/sms-textmagic', async (req, res) => {
+  console.log('Textmagic inbound:', JSON.stringify(req.body));
+  const from = req.body.from || req.body.phone;
+  const text = req.body.text || req.body.message;
+
+  if (!from || !text) return res.sendStatus(200);
+
+  console.log(`Textmagic SMS from ${from}: ${text}`);
+  try {
+    const conversation = await getOrCreateConversation(from);
+    await saveMessage(conversation.id, 'user', text);
+
+    await supabase
+      .from('leads')
+      .update({ last_message_sent_at: new Date(), bump_sent: false, status: 'vestluses' })
+      .eq('conversation_id', conversation.id);
+
+    if (conversation.ai_enabled === false) {
+      console.log('AI disabled, skipping auto-reply');
+      return res.sendStatus(200);
+    }
+
+    const history = await getMessages(conversation.id);
+    const chatHistory = history.map(m => ({ role: m.role, content: m.content }));
+    const systemPrompt = await getSystemPrompt();
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'system', content: systemPrompt }, ...chatHistory]
+    });
+    const reply = response.choices[0].message.content;
+    await saveMessage(conversation.id, 'assistant', reply);
+    await sendSMS(from, reply);
+    console.log('SMS sent successfully');
+    res.sendStatus(200);
+  } catch(err) {
+    console.error('Textmagic SMS handler error:', err);
+    res.sendStatus(500);
   }
 });
 
@@ -156,12 +222,7 @@ app.post('/conversations/:id/send', async (req, res) => {
     if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
 
     await saveMessage(conversationId, 'assistant', message);
-
-    await twilioClient.messages.create({
-      body: message,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      to: conversation.phone_number
-    });
+    await sendSMS(conversation.phone_number, message);
 
     await supabase
       .from('leads')
@@ -243,13 +304,7 @@ app.post('/lead', async (req, res) => {
 
     const { data: lead } = await supabase
       .from('leads')
-      .insert({
-        name,
-        phone: cleanPhone,
-        client_type: clientType,
-        extra_info,
-        status: 'uus'
-      })
+      .insert({ name, phone: cleanPhone, client_type: clientType, extra_info, status: 'uus' })
       .select()
       .single();
 
@@ -264,19 +319,11 @@ app.post('/lead', async (req, res) => {
     const reply = renderTemplate(firstMessageTemplate, { name: firstName });
 
     await saveMessage(conversation.id, 'assistant', reply);
-
-    await twilioClient.messages.create({
-      body: reply,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      to: cleanPhone
-    });
+    await sendSMS(cleanPhone, reply);
 
     await supabase
       .from('leads')
-      .update({
-        status: 'vestluses',
-        last_message_sent_at: new Date()
-      })
+      .update({ status: 'vestluses', last_message_sent_at: new Date() })
       .eq('id', lead.id);
 
     console.log('First SMS sent to lead');
@@ -342,21 +389,13 @@ app.post('/sms', async (req, res) => {
     console.log(`History length: ${chatHistory.length}`);
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...chatHistory
-      ]
+      messages: [{ role: 'system', content: systemPrompt }, ...chatHistory]
     });
     const reply = response.choices[0].message.content;
     console.log(`AI reply: ${reply}`);
 
     await saveMessage(conversation.id, 'assistant', reply);
-
-    await twilioClient.messages.create({
-      body: reply,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      to: from
-    });
+    await sendSMS(from, reply);
 
     console.log('SMS sent successfully');
     res.sendStatus(200);
@@ -387,28 +426,13 @@ app.get('/cron/check-bumps', async (req, res) => {
     for (const lead of (pendingLeads || [])) {
       if (!lead.last_message_sent_at) continue;
       if (lead.conversations && lead.conversations.ai_enabled === false) continue;
-
       const secondsSince = (now - new Date(lead.last_message_sent_at)) / 1000;
-
       if (secondsSince >= bumpDelaySeconds) {
         const firstName = lead.name ? lead.name.split(' ')[0] : '';
         const bumpMessage = renderTemplate(bumpMessageTemplate, { name: firstName });
-
-        await twilioClient.messages.create({
-          body: bumpMessage,
-          from: process.env.TWILIO_PHONE_NUMBER,
-          to: lead.phone
-        });
-
-        if (lead.conversation_id) {
-          await saveMessage(lead.conversation_id, 'assistant', bumpMessage);
-        }
-
-        await supabase
-          .from('leads')
-          .update({ bump_sent: true })
-          .eq('id', lead.id);
-
+        await sendSMS(lead.phone, bumpMessage);
+        if (lead.conversation_id) await saveMessage(lead.conversation_id, 'assistant', bumpMessage);
+        await supabase.from('leads').update({ bump_sent: true }).eq('id', lead.id);
         bumpedCount++;
         console.log(`Bump sent to ${lead.phone}`);
       }
@@ -423,15 +447,9 @@ app.get('/cron/check-bumps', async (req, res) => {
     for (const lead of (bumpedLeads || [])) {
       if (!lead.last_message_sent_at) continue;
       if (lead.conversations && lead.conversations.ai_enabled === false) continue;
-
       const secondsSinceBump = (now - new Date(lead.last_message_sent_at)) / 1000 - bumpDelaySeconds;
-
       if (secondsSinceBump >= noResponseDelaySeconds) {
-        await supabase
-          .from('leads')
-          .update({ status: 'ei vastanud' })
-          .eq('id', lead.id);
-
+        await supabase.from('leads').update({ status: 'ei vastanud' }).eq('id', lead.id);
         noResponseCount++;
         console.log(`Marked as no response: ${lead.phone}`);
       }
