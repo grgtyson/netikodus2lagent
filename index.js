@@ -176,8 +176,6 @@ app.post('/webhook', async (req, res) => {
           text: { body: reply }
         })
       });
-      console.log(`WhatsApp from ${from}: ${text}`);
-      console.log(`AI reply: ${reply}`);
     }
     res.sendStatus(200);
   } else {
@@ -185,12 +183,30 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
+app.post('/sms-delivery', (req, res) => {
+  console.log('Delivery notification received:', JSON.stringify(req.body));
+  res.sendStatus(200);
+});
+
 app.post('/sms-textmagic', upload.none(), async (req, res) => {
   console.log('Textmagic inbound raw:', JSON.stringify(req.body));
+
   const from = req.body.from || req.body.phone || req.body.sender;
   const text = req.body.text || req.body.message || req.body.body;
+
+  // Ignoreeri delivery notifikatsioone ja oma numbrit
+  if (!text || req.body.status) return res.sendStatus(200);
+
+  // Ignoreeri sõnumeid mis tulevad meie enda Textmagic numbrilt
+  const textmagicPhone = (process.env.TEXTMAGIC_PHONE || '').replace(/\D/g, '');
+  const fromClean = (from || '').replace(/\D/g, '');
+  if (fromClean === textmagicPhone) {
+    console.log('Ignoring message from own Textmagic number');
+    return res.sendStatus(200);
+  }
+
   console.log(`Textmagic SMS from ${from}: ${text}`);
-  if (!from || !text) return res.sendStatus(200);
+  if (!from) return res.sendStatus(200);
   await handleInboundSMS(from, text, res);
 });
 
@@ -275,7 +291,6 @@ app.post('/lead', async (req, res) => {
 
     const name = req.body['Täisnimi'] || req.body['name'] || req.body['Nimi'];
     const phone = req.body['Telefon'] || req.body['telf'];
-    const email = req.body['E-post'] || req.body['epost'] || '';
     const address = req.body['Aadress'] || req.body['field_edac53c'] || '';
     const clientType = req.body['Soovin päikesepaneele/akut:'] || req.body['field_38b7809'] || req.body['Klienditüüp'] || '';
     const productType = req.body['Kas soovid päikesepaneele, akut või mõlemat?'] || req.body['field_c671f4d'] || '';
