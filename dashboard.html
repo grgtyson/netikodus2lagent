@@ -220,6 +220,18 @@
       </div>
 
       <div class="field-block">
+        <span class="field-label">Esimese sõnumi viivitus (sekundites)</span>
+        <span class="field-hint">Kui kaua oodata peale vormi täitmist, enne kui esimene sõnum välja läheb (nii ei tundu, et vastab robot koheselt)</span>
+        <input type="number" id="first-message-delay-input" value="0">
+      </div>
+
+      <div class="field-block">
+        <span class="field-label">Sõnumite vahe (sekundites)</span>
+        <span class="field-hint">Kui kaua oodata enne AI vastuse saatmist kliendi sõnumile (viivitus jätab mulje, et keegi vastab käsitsi, mitte robot)</span>
+        <input type="number" id="reply-delay-input" value="0">
+      </div>
+
+      <div class="field-block">
         <span class="field-label">Bump saadetakse pärast (sekundites)</span>
         <span class="field-hint">Kui kaua oodata esimesest sõnumist enne meeldetuletuse saatmist</span>
         <input type="number" id="bump-delay-input" value="3600">
@@ -336,6 +348,8 @@
     document.getElementById('first-message-text').value = data.first_message_template;
     document.getElementById('bump-message-text').value = data.bump_message_template;
     document.getElementById('no-response-delay-input').value = data.no_response_delay_seconds;
+    document.getElementById('first-message-delay-input').value = data.first_message_delay_seconds;
+    document.getElementById('reply-delay-input').value = data.reply_delay_seconds;
     PRODUCT_VARIANTS.forEach(variant => {
       document.getElementById(`first-message-text-${variant}`).value = data[`first_message_template_${variant}`] || '';
       document.getElementById(`bump-message-text-${variant}`).value = data[`bump_message_template_${variant}`] || '';
@@ -349,9 +363,11 @@
     const first_message_template = document.getElementById('first-message-text').value;
     const bump_message_template = document.getElementById('bump-message-text').value;
     const no_response_delay_seconds = parseInt(document.getElementById('no-response-delay-input').value);
+    const first_message_delay_seconds = parseInt(document.getElementById('first-message-delay-input').value);
+    const reply_delay_seconds = parseInt(document.getElementById('reply-delay-input').value);
     const bumpDelaySeconds = parseInt(document.getElementById('bump-delay-input').value);
 
-    const body = { first_message_template, bump_message_template, no_response_delay_seconds };
+    const body = { first_message_template, bump_message_template, no_response_delay_seconds, first_message_delay_seconds, reply_delay_seconds };
     PRODUCT_VARIANTS.forEach(variant => {
       body[`first_message_template_${variant}`] = document.getElementById(`first-message-text-${variant}`).value;
       body[`bump_message_template_${variant}`] = document.getElementById(`bump-message-text-${variant}`).value;

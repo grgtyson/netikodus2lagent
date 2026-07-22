@@ -167,9 +167,18 @@ async function handleInboundSMS(from, text, res) {
     });
     const reply = response.choices[0].message.content;
     await saveMessage(conversation.id, 'assistant', reply);
-    await sendSMS(from, reply);
-    console.log('SMS sent successfully');
+
+    const replyDelaySeconds = parseInt(await getSetting('reply_delay_seconds', '0'));
     res.sendStatus(200);
+
+    setTimeout(async () => {
+      try {
+        await sendSMS(from, reply);
+        console.log('SMS sent successfully');
+      } catch (err) {
+        console.error('Delayed SMS send error:', err);
+      }
+    }, replyDelaySeconds * 1000);
   } catch(err) {
     console.error('Inbound SMS handler error:', err);
     res.sendStatus(500);
@@ -208,18 +217,26 @@ app.post('/webhook', async (req, res) => {
       });
       const reply = response.choices[0].message.content;
       await saveMessage(conversation.id, 'assistant', reply);
-      await fetch(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.WHATSAPP_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: from,
-          text: { body: reply }
-        })
-      });
+
+      const replyDelaySeconds = parseInt(await getSetting('reply_delay_seconds', '0'));
+      setTimeout(async () => {
+        try {
+          await fetch(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${process.env.WHATSAPP_TOKEN}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              messaging_product: 'whatsapp',
+              to: from,
+              text: { body: reply }
+            })
+          });
+        } catch (err) {
+          console.error('Delayed WhatsApp send error:', err);
+        }
+      }, replyDelaySeconds * 1000);
     }
     res.sendStatus(200);
   } else {
@@ -322,10 +339,14 @@ app.get('/templates', async (req, res) => {
   const firstMessage = await getSetting('first_message_template', 'Tere, {name}.');
   const bumpMessage = await getSetting('bump_message_template', 'Tere {name}! Kas jõudsid mu eelmise sõnumiga tutvuda?');
   const noResponseDelay = await getSetting('no_response_delay_seconds', '3600');
+  const firstMessageDelay = await getSetting('first_message_delay_seconds', '0');
+  const replyDelay = await getSetting('reply_delay_seconds', '0');
   const result = {
     first_message_template: firstMessage,
     bump_message_template: bumpMessage,
-    no_response_delay_seconds: parseInt(noResponseDelay)
+    no_response_delay_seconds: parseInt(noResponseDelay),
+    first_message_delay_seconds: parseInt(firstMessageDelay),
+    reply_delay_seconds: parseInt(replyDelay)
   };
   for (const variant of PRODUCT_VARIANTS) {
     result[`first_message_template_${variant}`] = await getSetting(`first_message_template_${variant}`, '');
@@ -335,10 +356,12 @@ app.get('/templates', async (req, res) => {
 });
 
 app.post('/templates', async (req, res) => {
-  const { first_message_template, bump_message_template, no_response_delay_seconds } = req.body;
+  const { first_message_template, bump_message_template, no_response_delay_seconds, first_message_delay_seconds, reply_delay_seconds } = req.body;
   if (first_message_template !== undefined) await setSetting('first_message_template', first_message_template);
   if (bump_message_template !== undefined) await setSetting('bump_message_template', bump_message_template);
   if (no_response_delay_seconds !== undefined) await setSetting('no_response_delay_seconds', String(no_response_delay_seconds));
+  if (first_message_delay_seconds !== undefined) await setSetting('first_message_delay_seconds', String(first_message_delay_seconds));
+  if (reply_delay_seconds !== undefined) await setSetting('reply_delay_seconds', String(reply_delay_seconds));
   for (const variant of PRODUCT_VARIANTS) {
     const firstVariant = req.body[`first_message_template_${variant}`];
     if (firstVariant !== undefined) await setSetting(`first_message_template_${variant}`, firstVariant);
@@ -395,21 +418,29 @@ app.post('/lead', async (req, res) => {
       .update({ conversation_id: conversation.id })
       .eq('id', lead.id);
 
-    const firstName = name ? name.split(' ')[0] : '';
-    const detectedProductType = detectProductType(extra_info);
-    const firstMessageTemplate = await getFirstMessageTemplate(detectedProductType);
-    const reply = renderTemplate(firstMessageTemplate, { name: firstName });
-
-    await saveMessage(conversation.id, 'assistant', reply);
-    await sendSMS(cleanPhone, reply);
-
-    await supabase
-      .from('leads')
-      .update({ status: 'vestluses', last_message_sent_at: new Date() })
-      .eq('id', lead.id);
-
-    console.log('First SMS sent to lead');
+    const firstMessageDelaySeconds = parseInt(await getSetting('first_message_delay_seconds', '0'));
     res.sendStatus(200);
+
+    setTimeout(async () => {
+      try {
+        const firstName = name ? name.split(' ')[0] : '';
+        const detectedProductType = detectProductType(extra_info);
+        const firstMessageTemplate = await getFirstMessageTemplate(detectedProductType);
+        const reply = renderTemplate(firstMessageTemplate, { name: firstName });
+
+        await saveMessage(conversation.id, 'assistant', reply);
+        await sendSMS(cleanPhone, reply);
+
+        await supabase
+          .from('leads')
+          .update({ status: 'vestluses', last_message_sent_at: new Date() })
+          .eq('id', lead.id);
+
+        console.log('First SMS sent to lead');
+      } catch (err) {
+        console.error('Delayed first SMS error:', err);
+      }
+    }, firstMessageDelaySeconds * 1000);
   } catch(err) {
     console.error('Lead handler error:', err);
     res.sendStatus(500);
