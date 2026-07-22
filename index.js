@@ -86,6 +86,19 @@ async function getSystemPrompt(productType) {
   return await getSetting('system_prompt', 'Sa oled abivalmis assistent.');
 }
 
+const CONVERSATION_END_MARKER = '[VESTLUS_LOPETATUD]';
+
+function withConversationEndInstruction(basePrompt) {
+  return `${basePrompt}\n\nKui hindad, et vestlus on sinu poolt lõpuni viidud (oled saanud kogu vajaliku info või lõpetad vestluse viisakalt, näiteks lubades, et spetsialist võtab peagi ühendust), lisa oma vastuse kõige lõppu uuele reale täpselt see märgis: ${CONVERSATION_END_MARKER}\nÄra kunagi maini seda märgist ega mainikoodi kliendile - see on ainult süsteemi jaoks ja eemaldatakse enne sõnumi saatmist.`;
+}
+
+function extractConversationEnd(reply) {
+  if (reply.includes(CONVERSATION_END_MARKER)) {
+    return { reply: reply.replaceAll(CONVERSATION_END_MARKER, '').trim(), ended: true };
+  }
+  return { reply, ended: false };
+}
+
 async function getFirstMessageTemplate(productType) {
   if (productType) {
     const variant = await getSetting(`first_message_template_${productType}`, null);
@@ -160,13 +173,17 @@ async function handleInboundSMS(from, text, res) {
     const history = await getMessages(conversation.id);
     const chatHistory = history.map(m => ({ role: m.role, content: m.content }));
     const productType = await getProductTypeForConversation(conversation.id);
-    const systemPrompt = await getSystemPrompt(productType);
+    const systemPrompt = withConversationEndInstruction(await getSystemPrompt(productType));
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'system', content: systemPrompt }, ...chatHistory]
     });
-    const reply = response.choices[0].message.content;
+    const { reply, ended } = extractConversationEnd(response.choices[0].message.content);
     await saveMessage(conversation.id, 'assistant', reply);
+    if (ended) {
+      await supabase.from('conversations').update({ ai_enabled: false }).eq('id', conversation.id);
+      console.log(`AI marked conversation ${conversation.id} as finished`);
+    }
 
     const replyDelaySeconds = parseInt(await getSetting('reply_delay_seconds', '0'));
     res.sendStatus(200);
@@ -207,16 +224,26 @@ app.post('/webhook', async (req, res) => {
       const text = message.text.body;
       const conversation = await getOrCreateConversation(from);
       await saveMessage(conversation.id, 'user', text);
+
+      if (conversation.ai_enabled === false) {
+        console.log('AI disabled, skipping WhatsApp auto-reply');
+        return res.sendStatus(200);
+      }
+
       const history = await getMessages(conversation.id);
       const chatHistory = history.map(m => ({ role: m.role, content: m.content }));
       const productType = await getProductTypeForConversation(conversation.id);
-      const systemPrompt = await getSystemPrompt(productType);
+      const systemPrompt = withConversationEndInstruction(await getSystemPrompt(productType));
       const response = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages: [{ role: 'system', content: systemPrompt }, ...chatHistory]
       });
-      const reply = response.choices[0].message.content;
+      const { reply, ended } = extractConversationEnd(response.choices[0].message.content);
       await saveMessage(conversation.id, 'assistant', reply);
+      if (ended) {
+        await supabase.from('conversations').update({ ai_enabled: false }).eq('id', conversation.id);
+        console.log(`AI marked conversation ${conversation.id} as finished`);
+      }
 
       const replyDelaySeconds = parseInt(await getSetting('reply_delay_seconds', '0'));
       setTimeout(async () => {
