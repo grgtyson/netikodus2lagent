@@ -110,7 +110,7 @@ async function getSystemPrompt(productType) {
 const CONVERSATION_END_MARKER = '[VESTLUS_LOPETATUD]';
 
 function withConversationEndInstruction(basePrompt) {
-  return `${basePrompt}\n\nKui hindad, et vestlus on sinu poolt lõpuni viidud (oled saanud kogu vajaliku info või lõpetad vestluse viisakalt, näiteks lubades, et spetsialist võtab peagi ühendust), lisa oma vastuse kõige lõppu uuele reale täpselt see märgis: ${CONVERSATION_END_MARKER}\nÄra kunagi maini seda märgist ega mainikoodi kliendile - see on ainult süsteemi jaoks ja eemaldatakse enne sõnumi saatmist.`;
+  return `${basePrompt}\n\nVESTLUSE LÕPETAMINE: Lisa oma vastuse kõige lõppu uuele reale täpselt see märgis: ${CONVERSATION_END_MARKER} AINULT siis, kui oled läbinud ja saanud vastuse absoluutselt KÕIKIDELE ülalpool kirjeldatud küsimustele/sammudele (kui juhistes on nummerdatud punktid või kindel skript, pead olema läbinud need TÄIELIKULT, mitte ainult osa neist) ja lõpetad vestluse viisakalt (nt lubades, et spetsialist võtab peagi ühendust). Kui kasvõi üks samm on veel läbimata või vastamata, ÄRA lisa märgist - esita hoopis järgmine puuduv küsimus. Ära lõpeta vestlust lihtsalt viisakusest või kuna klient tundub koostöövalmis - lõpeta ainult siis, kui kogu vajalik info on tegelikult kogutud.\nÄra kunagi maini seda märgist ega selle sisu kliendile - see on ainult süsteemi jaoks ja eemaldatakse enne sõnumi saatmist.`;
 }
 
 function extractConversationEnd(reply) {
