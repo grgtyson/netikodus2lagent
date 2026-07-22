@@ -150,8 +150,28 @@
   <div class="page" id="page-prompt">
     <div class="prompt-page">
       <h2>AI Prompt</h2>
-      <p>See on juhis, mida AI kasutab igal vestlusel. Muuda seda vastavalt oma teenusele.</p>
-      <textarea id="prompt-text" placeholder="Laadin..." style="min-height:300px"></textarea>
+      <p>See on juhis, mida AI kasutab igal vestlusel. Vastavalt sellele, mida klient vormis valis ("Soovib: Päikesepaneele / Akut / Mõlemat"), kasutatakse allolevat vastavat prompti. Kui tooteliiki ei tuvastata, kasutatakse vaikimisi prompti.</p>
+
+      <div class="field-block">
+        <span class="field-label">Vaikimisi prompt</span>
+        <textarea id="prompt-text" placeholder="Laadin..." style="min-height:200px"></textarea>
+      </div>
+
+      <div class="field-block">
+        <span class="field-label">Päikesepaneelid</span>
+        <textarea id="prompt-text-paikesepaneelid" placeholder="Laadin..." style="min-height:200px"></textarea>
+      </div>
+
+      <div class="field-block">
+        <span class="field-label">Aku</span>
+        <textarea id="prompt-text-akud" placeholder="Laadin..." style="min-height:200px"></textarea>
+      </div>
+
+      <div class="field-block">
+        <span class="field-label">Mõlemad</span>
+        <textarea id="prompt-text-molemad" placeholder="Laadin..." style="min-height:200px"></textarea>
+      </div>
+
       <div style="display:flex; align-items:center; gap:12px;">
         <button class="save-btn" onclick="savePrompt()">Salvesta</button>
         <span class="save-msg" id="save-msg">✓ Salvestatud</span>
@@ -163,16 +183,40 @@
   <div class="page" id="page-messages-settings">
     <div class="prompt-page">
       <h2>Sõnumi mallid ja ajastus</h2>
-      <p>Kasuta {name} kliendi eesnime jaoks. Need seaded juhivad automaatset esimest sõnumit, meeldetuletust ja "ei vastanud" märget.</p>
+      <p>Kasuta {name} kliendi eesnime jaoks. Vastavalt tuvastatud tooteliigile ("Soovib: Päikesepaneele / Akut / Mõlemat") kasutatakse vastavat malli, muidu vaikimisi malli.</p>
 
       <div class="field-block">
-        <span class="field-label">Esimene sõnum (saadetakse kohe pärast vormi täitmist)</span>
+        <span class="field-label">Esimene sõnum — Vaikimisi</span>
         <textarea id="first-message-text" placeholder="Laadin..."></textarea>
+      </div>
+      <div class="field-block">
+        <span class="field-label">Esimene sõnum — Päikesepaneelid</span>
+        <textarea id="first-message-text-paikesepaneelid" placeholder="Laadin..."></textarea>
+      </div>
+      <div class="field-block">
+        <span class="field-label">Esimene sõnum — Aku</span>
+        <textarea id="first-message-text-akud" placeholder="Laadin..."></textarea>
+      </div>
+      <div class="field-block">
+        <span class="field-label">Esimene sõnum — Mõlemad</span>
+        <textarea id="first-message-text-molemad" placeholder="Laadin..."></textarea>
       </div>
 
       <div class="field-block">
-        <span class="field-label">Bump sõnum (meeldetuletus, kui klient ei vasta)</span>
+        <span class="field-label">Bump sõnum — Vaikimisi</span>
         <textarea id="bump-message-text" placeholder="Laadin..."></textarea>
+      </div>
+      <div class="field-block">
+        <span class="field-label">Bump sõnum — Päikesepaneelid</span>
+        <textarea id="bump-message-text-paikesepaneelid" placeholder="Laadin..."></textarea>
+      </div>
+      <div class="field-block">
+        <span class="field-label">Bump sõnum — Aku</span>
+        <textarea id="bump-message-text-akud" placeholder="Laadin..."></textarea>
+      </div>
+      <div class="field-block">
+        <span class="field-label">Bump sõnum — Mõlemad</span>
+        <textarea id="bump-message-text-molemad" placeholder="Laadin..."></textarea>
       </div>
 
       <div class="field-block">
@@ -284,12 +328,18 @@
     loadLeads();
   }
 
+  const PRODUCT_VARIANTS = ['paikesepaneelid', 'akud', 'molemad'];
+
   async function loadTemplates() {
     const res = await fetch(`${API}/templates`);
     const data = await res.json();
     document.getElementById('first-message-text').value = data.first_message_template;
     document.getElementById('bump-message-text').value = data.bump_message_template;
     document.getElementById('no-response-delay-input').value = data.no_response_delay_seconds;
+    PRODUCT_VARIANTS.forEach(variant => {
+      document.getElementById(`first-message-text-${variant}`).value = data[`first_message_template_${variant}`] || '';
+      document.getElementById(`bump-message-text-${variant}`).value = data[`bump_message_template_${variant}`] || '';
+    });
     const bumpRes = await fetch(`${API}/settings/bump-delay`);
     const bumpData = await bumpRes.json();
     document.getElementById('bump-delay-input').value = bumpData.seconds;
@@ -301,10 +351,16 @@
     const no_response_delay_seconds = parseInt(document.getElementById('no-response-delay-input').value);
     const bumpDelaySeconds = parseInt(document.getElementById('bump-delay-input').value);
 
+    const body = { first_message_template, bump_message_template, no_response_delay_seconds };
+    PRODUCT_VARIANTS.forEach(variant => {
+      body[`first_message_template_${variant}`] = document.getElementById(`first-message-text-${variant}`).value;
+      body[`bump_message_template_${variant}`] = document.getElementById(`bump-message-text-${variant}`).value;
+    });
+
     await fetch(`${API}/templates`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ first_message_template, bump_message_template, no_response_delay_seconds })
+      body: JSON.stringify(body)
     });
 
     await fetch(`${API}/settings/bump-delay`, {
@@ -428,14 +484,20 @@
     const res = await fetch(`${API}/prompt`);
     const data = await res.json();
     document.getElementById('prompt-text').value = data.prompt;
+    PRODUCT_VARIANTS.forEach(variant => {
+      document.getElementById(`prompt-text-${variant}`).value = data[`prompt_${variant}`] || '';
+    });
   }
 
   async function savePrompt() {
-    const prompt = document.getElementById('prompt-text').value;
+    const body = { prompt: document.getElementById('prompt-text').value };
+    PRODUCT_VARIANTS.forEach(variant => {
+      body[`prompt_${variant}`] = document.getElementById(`prompt-text-${variant}`).value;
+    });
     await fetch(`${API}/prompt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt })
+      body: JSON.stringify(body)
     });
     const msg = document.getElementById('save-msg');
     msg.style.display = 'block';

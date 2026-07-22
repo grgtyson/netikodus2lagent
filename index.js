@@ -56,8 +56,50 @@ async function setSetting(key, value) {
     .upsert({ key, value }, { onConflict: 'key' });
 }
 
-async function getSystemPrompt() {
+const PRODUCT_VARIANTS = ['paikesepaneelid', 'akud', 'molemad'];
+
+function detectProductType(extraInfo) {
+  if (!extraInfo) return null;
+  const match = extraInfo.match(/Soovib:\s*([^,]+)/i);
+  if (!match) return null;
+  const value = match[1].trim().toLowerCase();
+  if (value.includes('mõlema') || value.includes('molema')) return 'molemad';
+  if (value.includes('päikese') || value.includes('paikese')) return 'paikesepaneelid';
+  if (value.includes('aku')) return 'akud';
+  return null;
+}
+
+async function getProductTypeForConversation(conversationId) {
+  const { data } = await supabase
+    .from('leads')
+    .select('extra_info')
+    .eq('conversation_id', conversationId)
+    .maybeSingle();
+  return detectProductType(data?.extra_info);
+}
+
+async function getSystemPrompt(productType) {
+  if (productType) {
+    const variant = await getSetting(`system_prompt_${productType}`, null);
+    if (variant) return variant;
+  }
   return await getSetting('system_prompt', 'Sa oled abivalmis assistent.');
+}
+
+async function getFirstMessageTemplate(productType) {
+  if (productType) {
+    const variant = await getSetting(`first_message_template_${productType}`, null);
+    if (variant) return variant;
+  }
+  return await getSetting('first_message_template', 'Tere, {name}.');
+}
+
+async function getBumpMessageTemplate(productType) {
+  if (productType) {
+    const variant = await getSetting(`bump_message_template_${productType}`, null);
+    if (variant) return variant;
+  }
+  return await getSetting('bump_message_template', 'Tere {name}! Kas jõudsid mu eelmise sõnumiga tutvuda?');
 }
 
 function renderTemplate(template, vars) {
@@ -117,9 +159,10 @@ async function handleInboundSMS(from, text, res) {
 
     const history = await getMessages(conversation.id);
     const chatHistory = history.map(m => ({ role: m.role, content: m.content }));
-    const systemPrompt = await getSystemPrompt();
+    const productType = await getProductTypeForConversation(conversation.id);
+    const systemPrompt = await getSystemPrompt(productType);
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       messages: [{ role: 'system', content: systemPrompt }, ...chatHistory]
     });
     const reply = response.choices[0].message.content;
@@ -157,9 +200,10 @@ app.post('/webhook', async (req, res) => {
       await saveMessage(conversation.id, 'user', text);
       const history = await getMessages(conversation.id);
       const chatHistory = history.map(m => ({ role: m.role, content: m.content }));
-      const systemPrompt = await getSystemPrompt();
+      const productType = await getProductTypeForConversation(conversation.id);
+      const systemPrompt = await getSystemPrompt(productType);
       const response = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
+        model: 'gpt-4o',
         messages: [{ role: 'system', content: systemPrompt }, ...chatHistory]
       });
       const reply = response.choices[0].message.content;
@@ -257,12 +301,20 @@ app.post('/conversations/:id/send', async (req, res) => {
 
 app.get('/prompt', async (req, res) => {
   const prompt = await getSystemPrompt();
-  res.json({ prompt });
+  const result = { prompt };
+  for (const variant of PRODUCT_VARIANTS) {
+    result[`prompt_${variant}`] = await getSetting(`system_prompt_${variant}`, '');
+  }
+  res.json(result);
 });
 
 app.post('/prompt', async (req, res) => {
   const { prompt } = req.body;
-  await setSetting('system_prompt', prompt);
+  if (prompt !== undefined) await setSetting('system_prompt', prompt);
+  for (const variant of PRODUCT_VARIANTS) {
+    const value = req.body[`prompt_${variant}`];
+    if (value !== undefined) await setSetting(`system_prompt_${variant}`, value);
+  }
   res.json({ success: true });
 });
 
@@ -270,11 +322,16 @@ app.get('/templates', async (req, res) => {
   const firstMessage = await getSetting('first_message_template', 'Tere, {name}.');
   const bumpMessage = await getSetting('bump_message_template', 'Tere {name}! Kas jõudsid mu eelmise sõnumiga tutvuda?');
   const noResponseDelay = await getSetting('no_response_delay_seconds', '3600');
-  res.json({
+  const result = {
     first_message_template: firstMessage,
     bump_message_template: bumpMessage,
     no_response_delay_seconds: parseInt(noResponseDelay)
-  });
+  };
+  for (const variant of PRODUCT_VARIANTS) {
+    result[`first_message_template_${variant}`] = await getSetting(`first_message_template_${variant}`, '');
+    result[`bump_message_template_${variant}`] = await getSetting(`bump_message_template_${variant}`, '');
+  }
+  res.json(result);
 });
 
 app.post('/templates', async (req, res) => {
@@ -282,6 +339,12 @@ app.post('/templates', async (req, res) => {
   if (first_message_template !== undefined) await setSetting('first_message_template', first_message_template);
   if (bump_message_template !== undefined) await setSetting('bump_message_template', bump_message_template);
   if (no_response_delay_seconds !== undefined) await setSetting('no_response_delay_seconds', String(no_response_delay_seconds));
+  for (const variant of PRODUCT_VARIANTS) {
+    const firstVariant = req.body[`first_message_template_${variant}`];
+    if (firstVariant !== undefined) await setSetting(`first_message_template_${variant}`, firstVariant);
+    const bumpVariant = req.body[`bump_message_template_${variant}`];
+    if (bumpVariant !== undefined) await setSetting(`bump_message_template_${variant}`, bumpVariant);
+  }
   res.json({ success: true });
 });
 
@@ -333,7 +396,8 @@ app.post('/lead', async (req, res) => {
       .eq('id', lead.id);
 
     const firstName = name ? name.split(' ')[0] : '';
-    const firstMessageTemplate = await getSetting('first_message_template', 'Tere, {name}.');
+    const detectedProductType = detectProductType(extra_info);
+    const firstMessageTemplate = await getFirstMessageTemplate(detectedProductType);
     const reply = renderTemplate(firstMessageTemplate, { name: firstName });
 
     await saveMessage(conversation.id, 'assistant', reply);
@@ -394,7 +458,6 @@ app.get('/cron/check-bumps', async (req, res) => {
   try {
     const bumpDelaySeconds = parseInt(await getSetting('bump_delay_seconds', '3600'));
     const noResponseDelaySeconds = parseInt(await getSetting('no_response_delay_seconds', '3600'));
-    const bumpMessageTemplate = await getSetting('bump_message_template', 'Tere {name}! Kas jõudsid mu eelmise sõnumiga tutvuda?');
 
     const now = new Date();
     let bumpedCount = 0;
@@ -412,6 +475,8 @@ app.get('/cron/check-bumps', async (req, res) => {
       const secondsSince = (now - new Date(lead.last_message_sent_at)) / 1000;
       if (secondsSince >= bumpDelaySeconds) {
         const firstName = lead.name ? lead.name.split(' ')[0] : '';
+        const productType = detectProductType(lead.extra_info);
+        const bumpMessageTemplate = await getBumpMessageTemplate(productType);
         const bumpMessage = renderTemplate(bumpMessageTemplate, { name: firstName });
         await sendSMS(lead.phone, bumpMessage);
         if (lead.conversation_id) await saveMessage(lead.conversation_id, 'assistant', bumpMessage);
