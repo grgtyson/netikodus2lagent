@@ -180,7 +180,7 @@ async function handleInboundSMS(from, text, res) {
 
     await supabase
       .from('leads')
-      .update({ last_message_sent_at: new Date(), bump_sent: false, status: 'vestluses' })
+      .update({ bump_sent: false, status: 'vestluses' })
       .eq('conversation_id', conversation.id);
 
     if (conversation.ai_enabled === false) {
@@ -209,6 +209,10 @@ async function handleInboundSMS(from, text, res) {
     setTimeout(async () => {
       try {
         await sendSMS(from, reply);
+        await supabase
+          .from('leads')
+          .update({ last_message_sent_at: new Date(), bump_sent: false })
+          .eq('conversation_id', conversation.id);
         console.log('SMS sent successfully');
       } catch (err) {
         console.error('Delayed SMS send error:', err);
@@ -278,6 +282,10 @@ app.post('/webhook', async (req, res) => {
               text: { body: reply }
             })
           });
+          await supabase
+            .from('leads')
+            .update({ last_message_sent_at: new Date(), bump_sent: false })
+            .eq('conversation_id', conversation.id);
         } catch (err) {
           console.error('Delayed WhatsApp send error:', err);
         }
