@@ -16,6 +16,16 @@ const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_A
 
 const SMS_PROVIDER = process.env.SMS_PROVIDER || 'twilio';
 
+async function logSmsSent(provider, phone, message, providerMessageId) {
+  try {
+    await supabase
+      .from('sms_log')
+      .insert({ provider, phone, message, provider_message_id: providerMessageId ? String(providerMessageId) : null });
+  } catch (err) {
+    console.error('Failed to log sent SMS:', err);
+  }
+}
+
 async function sendSMS(to, body) {
   if (SMS_PROVIDER === 'textmagic') {
     const response = await axios.post(
@@ -29,6 +39,7 @@ async function sendSMS(to, body) {
       }
     );
     console.log(`Textmagic SMS sent to ${to}:`, response.data);
+    await logSmsSent('textmagic', to, body, response.data?.id);
     return response.data;
   } else {
     const msg = await twilioClient.messages.create({
@@ -37,6 +48,7 @@ async function sendSMS(to, body) {
       to
     });
     console.log(`Twilio SMS sent to ${to}:`, msg.sid);
+    await logSmsSent('twilio', to, body, msg.sid);
     return msg;
   }
 }
