@@ -173,21 +173,29 @@ async function saveMessage(conversationId, role, content) {
 }
 
 async function handleInboundSMS(from, text, res) {
+  let conversation;
   try {
     from = normalizePhone(from);
-    const conversation = await getOrCreateConversation(from);
+    conversation = await getOrCreateConversation(from);
     await saveMessage(conversation.id, 'user', text);
 
     await supabase
       .from('leads')
       .update({ bump_sent: false, status: 'vestluses' })
       .eq('conversation_id', conversation.id);
+  } catch (err) {
+    console.error('Inbound SMS handler error:', err);
+    return res.sendStatus(500);
+  }
 
-    if (conversation.ai_enabled === false) {
-      console.log('AI disabled, skipping auto-reply');
-      return res.sendStatus(200);
-    }
+  res.sendStatus(200);
 
+  if (conversation.ai_enabled === false) {
+    console.log('AI disabled, skipping auto-reply');
+    return;
+  }
+
+  try {
     const history = await getMessages(conversation.id);
     const chatHistory = history.map(m => ({ role: m.role, content: m.content }));
     const productType = await getProductTypeForConversation(conversation.id);
@@ -204,8 +212,6 @@ async function handleInboundSMS(from, text, res) {
     }
 
     const replyDelaySeconds = parseInt(await getSetting('reply_delay_seconds', '0'));
-    res.sendStatus(200);
-
     setTimeout(async () => {
       try {
         await sendSMS(from, reply);
@@ -218,9 +224,8 @@ async function handleInboundSMS(from, text, res) {
         console.error('Delayed SMS send error:', err);
       }
     }, replyDelaySeconds * 1000);
-  } catch(err) {
-    console.error('Inbound SMS handler error:', err);
-    res.sendStatus(500);
+  } catch (err) {
+    console.error('AI reply generation error:', err);
   }
 }
 
@@ -241,17 +246,23 @@ app.post('/webhook', async (req, res) => {
   if (body.object === 'whatsapp_business_account') {
     const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
     const phoneNumberId = body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
-    if (message && message.type === 'text') {
-      const from = message.from;
-      const text = message.text.body;
-      const conversation = await getOrCreateConversation(normalizePhone(from));
-      await saveMessage(conversation.id, 'user', text);
+    if (!message || message.type !== 'text') {
+      return res.sendStatus(200);
+    }
 
-      if (conversation.ai_enabled === false) {
-        console.log('AI disabled, skipping WhatsApp auto-reply');
-        return res.sendStatus(200);
-      }
+    const from = message.from;
+    const text = message.text.body;
+    const conversation = await getOrCreateConversation(normalizePhone(from));
+    await saveMessage(conversation.id, 'user', text);
 
+    res.sendStatus(200);
+
+    if (conversation.ai_enabled === false) {
+      console.log('AI disabled, skipping WhatsApp auto-reply');
+      return;
+    }
+
+    try {
       const history = await getMessages(conversation.id);
       const chatHistory = history.map(m => ({ role: m.role, content: m.content }));
       const productType = await getProductTypeForConversation(conversation.id);
@@ -290,8 +301,9 @@ app.post('/webhook', async (req, res) => {
           console.error('Delayed WhatsApp send error:', err);
         }
       }, replyDelaySeconds * 1000);
+    } catch (err) {
+      console.error('WhatsApp reply generation error:', err);
     }
-    res.sendStatus(200);
   } else {
     res.sendStatus(404);
   }
