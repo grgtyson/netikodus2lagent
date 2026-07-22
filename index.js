@@ -56,6 +56,14 @@ async function setSetting(key, value) {
     .upsert({ key, value }, { onConflict: 'key' });
 }
 
+function normalizePhone(phone) {
+  if (!phone) return phone;
+  const clean = String(phone).replace(/[^\d+]/g, '');
+  if (clean.startsWith('+')) return clean;
+  if (clean.startsWith('372')) return '+' + clean;
+  return '+372' + clean.replace(/^0/, '');
+}
+
 const PRODUCT_VARIANTS = ['paikesepaneelid', 'akud', 'molemad'];
 
 function detectProductType(extraInfo) {
@@ -74,8 +82,9 @@ async function getProductTypeForConversation(conversationId) {
     .from('leads')
     .select('extra_info')
     .eq('conversation_id', conversationId)
-    .maybeSingle();
-  return detectProductType(data?.extra_info);
+    .order('created_at', { ascending: false })
+    .limit(1);
+  return detectProductType(data?.[0]?.extra_info);
 }
 
 async function getSystemPrompt(productType) {
@@ -123,21 +132,29 @@ function renderTemplate(template, vars) {
   return result;
 }
 
-async function getOrCreateConversation(phoneNumber) {
-  const { data } = await supabase
-    .from('conversations')
-    .select('*')
-    .eq('phone_number', phoneNumber)
-    .maybeSingle();
-
-  if (data) return data;
-
+async function createConversation(phoneNumber) {
   const { data: newConv } = await supabase
     .from('conversations')
     .insert({ phone_number: phoneNumber })
     .select()
     .single();
   return newConv;
+}
+
+async function getLatestConversation(phoneNumber) {
+  const { data } = await supabase
+    .from('conversations')
+    .select('*')
+    .eq('phone_number', phoneNumber)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  return data?.[0] || null;
+}
+
+async function getOrCreateConversation(phoneNumber) {
+  const existing = await getLatestConversation(phoneNumber);
+  if (existing) return existing;
+  return await createConversation(phoneNumber);
 }
 
 async function getMessages(conversationId) {
@@ -157,6 +174,7 @@ async function saveMessage(conversationId, role, content) {
 
 async function handleInboundSMS(from, text, res) {
   try {
+    from = normalizePhone(from);
     const conversation = await getOrCreateConversation(from);
     await saveMessage(conversation.id, 'user', text);
 
@@ -222,7 +240,7 @@ app.post('/webhook', async (req, res) => {
     if (message && message.type === 'text') {
       const from = message.from;
       const text = message.text.body;
-      const conversation = await getOrCreateConversation(from);
+      const conversation = await getOrCreateConversation(normalizePhone(from));
       await saveMessage(conversation.id, 'user', text);
 
       if (conversation.ai_enabled === false) {
@@ -428,10 +446,7 @@ app.post('/lead', async (req, res) => {
       return res.sendStatus(400);
     }
 
-    let cleanPhone = phone.replace(/\s+/g, '');
-    if (!cleanPhone.startsWith('+')) {
-      cleanPhone = '+372' + cleanPhone.replace(/^0/, '');
-    }
+    const cleanPhone = normalizePhone(phone);
 
     const { data: lead } = await supabase
       .from('leads')
@@ -439,7 +454,7 @@ app.post('/lead', async (req, res) => {
       .select()
       .single();
 
-    const conversation = await getOrCreateConversation(cleanPhone);
+    const conversation = await createConversation(cleanPhone);
     await supabase
       .from('leads')
       .update({ conversation_id: conversation.id })
