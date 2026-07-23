@@ -365,7 +365,7 @@ app.post('/sms-textmagic', upload.none(), async (req, res) => {
 app.get('/conversations', requireAuth, async (req, res) => {
   const { data } = await supabase
     .from('conversations')
-    .select('*, messages(*)')
+    .select('*, messages(*), leads(name, email)')
     .order('created_at', { ascending: false });
   res.json(data);
 });
@@ -491,6 +491,7 @@ app.post('/lead', async (req, res) => {
     console.log('RAW BODY:', JSON.stringify(req.body));
 
     const name = req.body['Täisnimi'] || req.body['name'] || req.body['Nimi'];
+    const email = req.body['E-post'] || req.body['Email'] || req.body['email'] || '';
     const phone = req.body['Telefon'] || req.body['telf'];
     const address = req.body['Aadress'] || req.body['field_edac53c'] || '';
     const clientType = req.body['Soovin päikesepaneele/akut:'] || req.body['field_38b7809'] || req.body['Klienditüüp'] || '';
@@ -520,7 +521,7 @@ app.post('/lead', async (req, res) => {
 
     const { data: lead } = await supabase
       .from('leads')
-      .insert({ name, phone: cleanPhone, client_type: clientType, extra_info, status: 'uus' })
+      .insert({ name, email, phone: cleanPhone, client_type: clientType, extra_info, status: 'uus' })
       .select()
       .single();
 

@@ -25,6 +25,7 @@
     .conv-item:hover { background: #161616; }
     .conv-item.active { background: #1a1a1a; border-left: 2px solid #3b82f6; }
     .conv-phone { font-size: 14px; font-weight: 500; }
+    .conv-email { font-size: 11px; color: #777; margin-top: 2px; }
     .conv-preview { font-size: 12px; color: #555; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .conv-time { font-size: 11px; color: #444; margin-top: 4px; }
     
@@ -525,11 +526,13 @@
       conversations.forEach(conv => {
         const msgs = conv.messages || [];
         const last = msgs[msgs.length - 1];
+        const lead = (conv.leads && conv.leads[0]) || null;
         const div = document.createElement('div');
         div.className = 'conv-item' + (conv.id === activeId ? ' active' : '');
         div.dataset.id = conv.id;
         div.innerHTML = `
-          <div class="conv-phone">+${conv.phone_number}</div>
+          <div class="conv-phone">${lead && lead.name ? lead.name + ' · ' : ''}+${conv.phone_number}</div>
+          ${lead && lead.email ? `<div class="conv-email">${lead.email}</div>` : ''}
           <div class="conv-preview">${last ? last.content : 'Sõnumeid pole'}</div>
           <div class="conv-time">${new Date(conv.created_at).toLocaleString('et-EE')}</div>
         `;
