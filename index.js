@@ -14,6 +14,20 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
+async function requireAuth(req, res, next) {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) return res.sendStatus(401);
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error || !data?.user) return res.sendStatus(401);
+  req.user = data.user;
+  next();
+}
+
+app.get('/auth-config', (req, res) => {
+  res.json({ url: process.env.SUPABASE_URL, anonKey: process.env.SUPABASE_ANON_KEY });
+});
+
 const SMS_PROVIDER = process.env.SMS_PROVIDER || 'twilio';
 
 async function logSmsSent(provider, phone, message, providerMessageId) {
@@ -348,7 +362,7 @@ app.post('/sms-textmagic', upload.none(), async (req, res) => {
   await handleInboundSMS(from, text, res);
 });
 
-app.get('/conversations', async (req, res) => {
+app.get('/conversations', requireAuth, async (req, res) => {
   const { data } = await supabase
     .from('conversations')
     .select('*, messages(*)')
@@ -356,7 +370,7 @@ app.get('/conversations', async (req, res) => {
   res.json(data);
 });
 
-app.post('/conversations/:id/toggle-ai', async (req, res) => {
+app.post('/conversations/:id/toggle-ai', requireAuth, async (req, res) => {
   const { ai_enabled } = req.body;
   await supabase
     .from('conversations')
@@ -365,7 +379,7 @@ app.post('/conversations/:id/toggle-ai', async (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/conversations/:id/send', async (req, res) => {
+app.post('/conversations/:id/send', requireAuth, async (req, res) => {
   try {
     const { message } = req.body;
     const conversationId = req.params.id;
@@ -393,7 +407,7 @@ app.post('/conversations/:id/send', async (req, res) => {
   }
 });
 
-app.get('/prompt', async (req, res) => {
+app.get('/prompt', requireAuth, async (req, res) => {
   const prompt = await getSystemPrompt();
   const result = { prompt };
   for (const variant of PRODUCT_VARIANTS) {
@@ -402,7 +416,7 @@ app.get('/prompt', async (req, res) => {
   res.json(result);
 });
 
-app.post('/prompt', async (req, res) => {
+app.post('/prompt', requireAuth, async (req, res) => {
   const { prompt } = req.body;
   if (prompt !== undefined) await setSetting('system_prompt', prompt);
   for (const variant of PRODUCT_VARIANTS) {
@@ -412,14 +426,14 @@ app.post('/prompt', async (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/test-chat/first-message', async (req, res) => {
+app.get('/test-chat/first-message', requireAuth, async (req, res) => {
   const productType = req.query.productType || null;
   const template = await getFirstMessageTemplate(productType);
   const message = renderTemplate(template, { name: 'Test' });
   res.json({ message });
 });
 
-app.post('/test-chat', async (req, res) => {
+app.post('/test-chat', requireAuth, async (req, res) => {
   try {
     const productType = req.body.productType || null;
     const messages = Array.isArray(req.body.messages) ? req.body.messages : [];
@@ -436,7 +450,7 @@ app.post('/test-chat', async (req, res) => {
   }
 });
 
-app.get('/templates', async (req, res) => {
+app.get('/templates', requireAuth, async (req, res) => {
   const firstMessage = await getSetting('first_message_template', 'Tere, {name}.');
   const bumpMessage = await getSetting('bump_message_template', 'Tere {name}! Kas jõudsid mu eelmise sõnumiga tutvuda?');
   const noResponseDelay = await getSetting('no_response_delay_seconds', '3600');
@@ -456,7 +470,7 @@ app.get('/templates', async (req, res) => {
   res.json(result);
 });
 
-app.post('/templates', async (req, res) => {
+app.post('/templates', requireAuth, async (req, res) => {
   const { first_message_template, bump_message_template, no_response_delay_seconds, first_message_delay_seconds, reply_delay_seconds } = req.body;
   if (first_message_template !== undefined) await setSetting('first_message_template', first_message_template);
   if (bump_message_template !== undefined) await setSetting('bump_message_template', bump_message_template);
@@ -545,7 +559,7 @@ app.post('/lead', async (req, res) => {
   }
 });
 
-app.get('/leads', async (req, res) => {
+app.get('/leads', requireAuth, async (req, res) => {
   const { data } = await supabase
     .from('leads')
     .select('*, conversations(*, messages(*))')
@@ -553,7 +567,7 @@ app.get('/leads', async (req, res) => {
   res.json(data);
 });
 
-app.post('/leads/:id/status', async (req, res) => {
+app.post('/leads/:id/status', requireAuth, async (req, res) => {
   const { status } = req.body;
   await supabase
     .from('leads')
@@ -562,12 +576,12 @@ app.post('/leads/:id/status', async (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/settings/bump-delay', async (req, res) => {
+app.get('/settings/bump-delay', requireAuth, async (req, res) => {
   const seconds = await getSetting('bump_delay_seconds', '3600');
   res.json({ seconds: parseInt(seconds) });
 });
 
-app.post('/settings/bump-delay', async (req, res) => {
+app.post('/settings/bump-delay', requireAuth, async (req, res) => {
   const { seconds } = req.body;
   await setSetting('bump_delay_seconds', String(seconds));
   res.json({ success: true });

@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Netikodu — Vestlused</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e8e8e8; height: 100vh; display: flex; flex-direction: column; }
@@ -99,16 +100,44 @@
     .lead-type { display: inline-block; font-size: 10px; color: #60a5fa; background: #1d3a6e; padding: 2px 6px; border-radius: 10px; margin-top: 6px; }
     .lead-time { font-size: 10px; color: #444; margin-top: 6px; }
     .lead-status-select { width: 100%; margin-top: 8px; background: #161616; border: 1px solid #2a2a2a; border-radius: 6px; color: #ccc; font-size: 11px; padding: 4px 6px; }
+
+    /* Login */
+    #login-screen { position: fixed; inset: 0; background: #0f0f0f; display: flex; align-items: center; justify-content: center; z-index: 100; }
+    #login-screen.hidden { display: none; }
+    .login-box { width: 320px; display: flex; flex-direction: column; gap: 14px; }
+    .login-box h1 { font-size: 18px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+    .login-box input { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 10px 14px; color: #e8e8e8; font-size: 13px; }
+    .login-box input:focus { outline: none; border-color: #3b82f6; }
+    .login-box button { background: #3b82f6; color: #fff; border: none; padding: 10px 14px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+    .login-box button:hover { background: #2563eb; }
+    .login-box button:disabled { background: #2a2a2a; color: #666; cursor: not-allowed; }
+    .login-error { font-size: 12px; color: #f87171; display: none; }
+    #app-shell { display: flex; flex-direction: column; height: 100vh; }
+    #app-shell.hidden { display: none; }
+    .logout-btn { margin-left: auto; background: none; border: none; color: #666; font-size: 12px; cursor: pointer; padding: 14px 24px; }
+    .logout-btn:hover { color: #e8e8e8; }
   </style>
 </head>
 <body>
 
+<div id="login-screen">
+  <div class="login-box">
+    <h1>Netikodu — Logi sisse</h1>
+    <input type="email" id="login-email" placeholder="E-post" autocomplete="username">
+    <input type="password" id="login-password" placeholder="Parool" autocomplete="current-password" onkeydown="if(event.key==='Enter') doLogin()">
+    <button id="login-btn" onclick="doLogin()">Logi sisse</button>
+    <span class="login-error" id="login-error">Vale e-post või parool.</span>
+  </div>
+</div>
+
+<div id="app-shell" class="hidden">
 <div class="topbar">
   <div class="tab active" onclick="showTab('pipeline', this)">Leads</div>
   <div class="tab" onclick="showTab('conversations', this)">Vestlused</div>
   <div class="tab" onclick="showTab('test-chat', this)">Testi vestlust</div>
   <div class="tab" onclick="showTab('prompt', this)">AI Prompt</div>
   <div class="tab" onclick="showTab('messages-settings', this)">Sõnumid</div>
+  <button class="logout-btn" onclick="doLogout()">Logi välja</button>
 </div>
 
 <div class="content">
@@ -285,9 +314,70 @@
     </div>
   </div>
 </div>
+</div>
 
 <script>
   const API = window.location.origin;
+  let supabaseClient = null;
+  let appStarted = false;
+
+  async function apiFetch(url, options = {}) {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const headers = { ...(options.headers || {}) };
+    if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
+    const res = await fetch(url, { ...options, headers });
+    if (res.status === 401) showLogin();
+    return res;
+  }
+
+  function showLogin() {
+    document.getElementById('login-screen').classList.remove('hidden');
+    document.getElementById('app-shell').classList.add('hidden');
+  }
+
+  function showApp() {
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('app-shell').classList.remove('hidden');
+    if (!appStarted) {
+      appStarted = true;
+      loadLeads();
+      loadConversations();
+      setInterval(() => {
+        loadConversations();
+        if (document.getElementById('page-pipeline').classList.contains('active')) loadLeads();
+      }, 30000);
+    }
+  }
+
+  async function doLogin() {
+    const email = document.getElementById('login-email').value.trim();
+    const password = document.getElementById('login-password').value;
+    const btn = document.getElementById('login-btn');
+    const errorEl = document.getElementById('login-error');
+    errorEl.style.display = 'none';
+    btn.disabled = true;
+    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    btn.disabled = false;
+    if (error) {
+      errorEl.style.display = 'block';
+      return;
+    }
+    showApp();
+  }
+
+  async function doLogout() {
+    await supabaseClient.auth.signOut();
+    showLogin();
+  }
+
+  async function initAuth() {
+    const res = await fetch(`${API}/auth-config`);
+    const { url, anonKey } = await res.json();
+    supabaseClient = supabase.createClient(url, anonKey);
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session) showApp(); else showLogin();
+  }
+
   let conversations = [];
   let leads = [];
   let activeId = null;
@@ -313,7 +403,7 @@
 
   async function loadLeads() {
     try {
-      const res = await fetch(`${API}/leads`);
+      const res = await apiFetch(`${API}/leads`);
       leads = await res.json();
       renderBoard();
     } catch(e) {
@@ -367,7 +457,7 @@
   }
 
   async function updateStatus(leadId, status) {
-    await fetch(`${API}/leads/${leadId}/status`, {
+    await apiFetch(`${API}/leads/${leadId}/status`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status })
@@ -378,7 +468,7 @@
   const PRODUCT_VARIANTS = ['paikesepaneelid', 'akud', 'molemad'];
 
   async function loadTemplates() {
-    const res = await fetch(`${API}/templates`);
+    const res = await apiFetch(`${API}/templates`);
     const data = await res.json();
     document.getElementById('first-message-text').value = data.first_message_template;
     document.getElementById('bump-message-text').value = data.bump_message_template;
@@ -389,7 +479,7 @@
       document.getElementById(`first-message-text-${variant}`).value = data[`first_message_template_${variant}`] || '';
       document.getElementById(`bump-message-text-${variant}`).value = data[`bump_message_template_${variant}`] || '';
     });
-    const bumpRes = await fetch(`${API}/settings/bump-delay`);
+    const bumpRes = await apiFetch(`${API}/settings/bump-delay`);
     const bumpData = await bumpRes.json();
     document.getElementById('bump-delay-input').value = bumpData.seconds;
   }
@@ -408,13 +498,13 @@
       body[`bump_message_template_${variant}`] = document.getElementById(`bump-message-text-${variant}`).value;
     });
 
-    await fetch(`${API}/templates`, {
+    await apiFetch(`${API}/templates`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
 
-    await fetch(`${API}/settings/bump-delay`, {
+    await apiFetch(`${API}/settings/bump-delay`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ seconds: bumpDelaySeconds })
@@ -427,7 +517,7 @@
 
   async function loadConversations() {
     try {
-      const res = await fetch(`${API}/conversations`);
+      const res = await apiFetch(`${API}/conversations`);
       conversations = await res.json();
       document.getElementById('conv-count').textContent = conversations.length;
       const list = document.getElementById('conv-list');
@@ -504,7 +594,7 @@
     if (!activeId) return;
     const conv = conversations.find(c => c.id === activeId);
     const newState = !(conv.ai_enabled !== false);
-    await fetch(`${API}/conversations/${activeId}/toggle-ai`, {
+    await apiFetch(`${API}/conversations/${activeId}/toggle-ai`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ai_enabled: newState })
@@ -519,7 +609,7 @@
     if (!message || !activeId) return;
 
     input.disabled = true;
-    await fetch(`${API}/conversations/${activeId}/send`, {
+    await apiFetch(`${API}/conversations/${activeId}/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message })
@@ -532,7 +622,7 @@
   }
 
   async function loadPrompt() {
-    const res = await fetch(`${API}/prompt`);
+    const res = await apiFetch(`${API}/prompt`);
     const data = await res.json();
     document.getElementById('prompt-text').value = data.prompt;
     PRODUCT_VARIANTS.forEach(variant => {
@@ -545,7 +635,7 @@
     PRODUCT_VARIANTS.forEach(variant => {
       body[`prompt_${variant}`] = document.getElementById(`prompt-text-${variant}`).value;
     });
-    await fetch(`${API}/prompt`, {
+    await apiFetch(`${API}/prompt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -587,7 +677,7 @@
       return;
     }
     container.innerHTML = '<div class="empty">Laadin...</div>';
-    const res = await fetch(`${API}/test-chat/first-message?productType=${encodeURIComponent(testVariant)}`);
+    const res = await apiFetch(`${API}/test-chat/first-message?productType=${encodeURIComponent(testVariant)}`);
     const data = await res.json();
     testMessages.push({ role: 'assistant', content: data.message });
     renderTestMessages();
@@ -605,7 +695,7 @@
     input.disabled = true;
 
     try {
-      const res = await fetch(`${API}/test-chat`, {
+      const res = await apiFetch(`${API}/test-chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ productType: testVariant, messages: testMessages })
@@ -621,12 +711,7 @@
     input.focus();
   }
 
-  loadLeads();
-  loadConversations();
-  setInterval(() => {
-    loadConversations();
-    if (document.getElementById('page-pipeline').classList.contains('active')) loadLeads();
-  }, 30000);
+  initAuth();
 </script>
 
 </body>
