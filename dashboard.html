@@ -77,6 +77,7 @@
     .field-hint { font-size: 11px; color: #555; }
     .field-block textarea { min-height: 80px; }
     .field-block input[type=number] { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 8px 10px; color: #e8e8e8; font-size: 13px; width: 140px; }
+    .field-block select { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 8px 10px; color: #e8e8e8; font-size: 13px; width: 260px; }
 
     .refresh-btn { background: #1e1e1e; border: 1px solid #2a2a2a; color: #aaa; padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; }
     .refresh-btn:hover { background: #252525; color: #e8e8e8; }
@@ -193,6 +194,12 @@
         <button class="test-variant-btn" data-variant="akud" onclick="selectTestVariant('akud', this)">Akud</button>
         <button class="test-variant-btn" data-variant="molemad" onclick="selectTestVariant('molemad', this)">Mõlemat</button>
       </div>
+      <div style="padding: 0 16px 16px;">
+        <span class="field-label" style="display:block; margin-bottom:6px;">AI mudel</span>
+        <select id="test-model-select" style="width:100%; background:#1a1a1a; border:1px solid #2a2a2a; border-radius:6px; padding:8px 10px; color:#e8e8e8; font-size:13px;" onchange="resetTestChat()">
+          <option>Laadin...</option>
+        </select>
+      </div>
       <div style="padding: 0 16px;">
         <button class="refresh-btn" onclick="resetTestChat()">↺ Lähtesta vestlus</button>
       </div>
@@ -249,6 +256,12 @@
     <div class="prompt-page">
       <h2>Sõnumi mallid ja ajastus</h2>
       <p>Kasuta {name} kliendi eesnime jaoks. Vastavalt tuvastatud tooteliigile ("Soovib: Päikesepaneele / Akut / Mõlemat") kasutatakse vastavat malli, muidu vaikimisi malli.</p>
+
+      <div class="field-block">
+        <span class="field-label">AI mudel</span>
+        <span class="field-hint">Milline OpenAI mudel genereerib vestluste vastuseid</span>
+        <select id="ai-model-select"><option>Laadin...</option></select>
+      </div>
 
       <div class="field-block">
         <span class="field-label">Esimene sõnum — Vaikimisi</span>
@@ -400,6 +413,18 @@
     if (tab === 'prompt') loadPrompt();
     if (tab === 'pipeline') loadLeads();
     if (tab === 'messages-settings') loadTemplates();
+    if (tab === 'test-chat') loadTestModelOptions();
+  }
+
+  let testModelLoaded = false;
+
+  async function loadTestModelOptions() {
+    if (testModelLoaded) return;
+    testModelLoaded = true;
+    const models = await fetchAiModels();
+    const templatesRes = await apiFetch(`${API}/templates`);
+    const templatesData = await templatesRes.json();
+    populateModelSelect(document.getElementById('test-model-select'), models, templatesData.ai_model);
   }
 
   async function loadLeads() {
@@ -468,6 +493,20 @@
 
   const PRODUCT_VARIANTS = ['paikesepaneelid', 'akud', 'molemad'];
 
+  let aiModelsCache = null;
+
+  async function fetchAiModels() {
+    if (aiModelsCache) return aiModelsCache;
+    const res = await apiFetch(`${API}/ai-models`);
+    const data = await res.json();
+    aiModelsCache = data.models && data.models.length ? data.models : ['gpt-4o'];
+    return aiModelsCache;
+  }
+
+  function populateModelSelect(selectEl, models, selected) {
+    selectEl.innerHTML = models.map(m => `<option value="${m}" ${m === selected ? 'selected' : ''}>${m}</option>`).join('');
+  }
+
   async function loadTemplates() {
     const res = await apiFetch(`${API}/templates`);
     const data = await res.json();
@@ -480,6 +519,8 @@
       document.getElementById(`first-message-text-${variant}`).value = data[`first_message_template_${variant}`] || '';
       document.getElementById(`bump-message-text-${variant}`).value = data[`bump_message_template_${variant}`] || '';
     });
+    const models = await fetchAiModels();
+    populateModelSelect(document.getElementById('ai-model-select'), models, data.ai_model);
     const bumpRes = await apiFetch(`${API}/settings/bump-delay`);
     const bumpData = await bumpRes.json();
     document.getElementById('bump-delay-input').value = bumpData.seconds;
@@ -492,8 +533,9 @@
     const first_message_delay_seconds = parseInt(document.getElementById('first-message-delay-input').value);
     const reply_delay_seconds = parseInt(document.getElementById('reply-delay-input').value);
     const bumpDelaySeconds = parseInt(document.getElementById('bump-delay-input').value);
+    const ai_model = document.getElementById('ai-model-select').value;
 
-    const body = { first_message_template, bump_message_template, no_response_delay_seconds, first_message_delay_seconds, reply_delay_seconds };
+    const body = { first_message_template, bump_message_template, no_response_delay_seconds, first_message_delay_seconds, reply_delay_seconds, ai_model };
     PRODUCT_VARIANTS.forEach(variant => {
       body[`first_message_template_${variant}`] = document.getElementById(`first-message-text-${variant}`).value;
       body[`bump_message_template_${variant}`] = document.getElementById(`bump-message-text-${variant}`).value;
@@ -698,10 +740,11 @@
     input.disabled = true;
 
     try {
+      const model = document.getElementById('test-model-select').value;
       const res = await apiFetch(`${API}/test-chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productType: testVariant, messages: testMessages })
+        body: JSON.stringify({ productType: testVariant, messages: testMessages, model })
       });
       const data = await res.json();
       testMessages.push({ role: 'assistant', content: data.reply });

@@ -227,7 +227,7 @@ async function handleInboundSMS(from, text, res) {
     const productType = await getProductTypeForConversation(conversation.id);
     const systemPrompt = withConversationEndInstruction(await getSystemPrompt(productType));
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: await getAiModel(),
       messages: [{ role: 'system', content: systemPrompt }, ...chatHistory]
     });
     const { reply, ended } = extractConversationEnd(response.choices[0].message.content);
@@ -294,7 +294,7 @@ app.post('/webhook', async (req, res) => {
       const productType = await getProductTypeForConversation(conversation.id);
       const systemPrompt = withConversationEndInstruction(await getSystemPrompt(productType));
       const response = await openai.chat.completions.create({
-        model: 'gpt-4o',
+        model: await getAiModel(),
         messages: [{ role: 'system', content: systemPrompt }, ...chatHistory]
       });
       const { reply, ended } = extractConversationEnd(response.choices[0].message.content);
@@ -426,6 +426,26 @@ app.post('/prompt', requireAuth, async (req, res) => {
   res.json({ success: true });
 });
 
+function isChatModel(id) {
+  if (/embedding|whisper|tts|dall-e|moderation|davinci-002|babbage-002|realtime|audio|transcribe|image/i.test(id)) return false;
+  return /^(gpt-|o1|o3|o4|chatgpt)/i.test(id);
+}
+
+async function getAiModel() {
+  return await getSetting('ai_model', 'gpt-4o');
+}
+
+app.get('/ai-models', requireAuth, async (req, res) => {
+  try {
+    const list = await openai.models.list();
+    const models = list.data.map(m => m.id).filter(isChatModel).sort();
+    res.json({ models });
+  } catch (err) {
+    console.error('Failed to list OpenAI models:', err);
+    res.status(500).json({ models: [] });
+  }
+});
+
 app.get('/test-chat/first-message', requireAuth, async (req, res) => {
   const productType = req.query.productType || null;
   const template = await getFirstMessageTemplate(productType);
@@ -437,9 +457,10 @@ app.post('/test-chat', requireAuth, async (req, res) => {
   try {
     const productType = req.body.productType || null;
     const messages = Array.isArray(req.body.messages) ? req.body.messages : [];
+    const model = req.body.model || await getAiModel();
     const systemPrompt = withConversationEndInstruction(await getSystemPrompt(productType));
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model,
       messages: [{ role: 'system', content: systemPrompt }, ...messages]
     });
     const { reply, ended } = extractConversationEnd(response.choices[0].message.content);
@@ -456,12 +477,14 @@ app.get('/templates', requireAuth, async (req, res) => {
   const noResponseDelay = await getSetting('no_response_delay_seconds', '3600');
   const firstMessageDelay = await getSetting('first_message_delay_seconds', '0');
   const replyDelay = await getSetting('reply_delay_seconds', '0');
+  const aiModel = await getAiModel();
   const result = {
     first_message_template: firstMessage,
     bump_message_template: bumpMessage,
     no_response_delay_seconds: parseInt(noResponseDelay),
     first_message_delay_seconds: parseInt(firstMessageDelay),
-    reply_delay_seconds: parseInt(replyDelay)
+    reply_delay_seconds: parseInt(replyDelay),
+    ai_model: aiModel
   };
   for (const variant of PRODUCT_VARIANTS) {
     result[`first_message_template_${variant}`] = await getSetting(`first_message_template_${variant}`, '');
@@ -471,12 +494,13 @@ app.get('/templates', requireAuth, async (req, res) => {
 });
 
 app.post('/templates', requireAuth, async (req, res) => {
-  const { first_message_template, bump_message_template, no_response_delay_seconds, first_message_delay_seconds, reply_delay_seconds } = req.body;
+  const { first_message_template, bump_message_template, no_response_delay_seconds, first_message_delay_seconds, reply_delay_seconds, ai_model } = req.body;
   if (first_message_template !== undefined) await setSetting('first_message_template', first_message_template);
   if (bump_message_template !== undefined) await setSetting('bump_message_template', bump_message_template);
   if (no_response_delay_seconds !== undefined) await setSetting('no_response_delay_seconds', String(no_response_delay_seconds));
   if (first_message_delay_seconds !== undefined) await setSetting('first_message_delay_seconds', String(first_message_delay_seconds));
   if (reply_delay_seconds !== undefined) await setSetting('reply_delay_seconds', String(reply_delay_seconds));
+  if (ai_model !== undefined) await setSetting('ai_model', ai_model);
   for (const variant of PRODUCT_VARIANTS) {
     const firstVariant = req.body[`first_message_template_${variant}`];
     if (firstVariant !== undefined) await setSetting(`first_message_template_${variant}`, firstVariant);
