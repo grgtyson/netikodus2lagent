@@ -412,6 +412,30 @@ app.post('/prompt', async (req, res) => {
   res.json({ success: true });
 });
 
+app.get('/test-chat/first-message', async (req, res) => {
+  const productType = req.query.productType || null;
+  const template = await getFirstMessageTemplate(productType);
+  const message = renderTemplate(template, { name: 'Test' });
+  res.json({ message });
+});
+
+app.post('/test-chat', async (req, res) => {
+  try {
+    const productType = req.body.productType || null;
+    const messages = Array.isArray(req.body.messages) ? req.body.messages : [];
+    const systemPrompt = withConversationEndInstruction(await getSystemPrompt(productType));
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{ role: 'system', content: systemPrompt }, ...messages]
+    });
+    const { reply, ended } = extractConversationEnd(response.choices[0].message.content);
+    res.json({ reply, ended });
+  } catch (err) {
+    console.error('Test chat error:', err);
+    res.sendStatus(500);
+  }
+});
+
 app.get('/templates', async (req, res) => {
   const firstMessage = await getSetting('first_message_template', 'Tere, {name}.');
   const bumpMessage = await getSetting('bump_message_template', 'Tere {name}! Kas jõudsid mu eelmise sõnumiga tutvuda?');
