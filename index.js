@@ -455,8 +455,7 @@ Väljasta AINULT JSON, täpselt sellises struktuuris, muud teksti ei tohi olla:
 {
   "answers": [
     { "question": "lühike küsimuse kirjeldus", "answer": "kliendi vastus" }
-  ],
-  "summary": "1-2 lauseline kokkuvõte kogu vestlusest"
+  ]
 }
 
 Kui klient ei vastanud mõnele küsimusele, jäta see rida loetelust välja. Kirjuta eesti keeles, kokkuvõtvalt ja konkreetselt.`;
