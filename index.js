@@ -461,26 +461,48 @@ Väljasta AINULT JSON, täpselt sellises struktuuris, muud teksti ei tohi olla:
 
 Kui klient ei vastanud mõnele küsimusele, jäta see rida loetelust välja. Kirjuta eesti keeles, kokkuvõtvalt ja konkreetselt.`;
 
+async function extractSummaryFromMessages(messages) {
+  if (!messages.length) return null;
+  const transcript = messages.map(m => `${m.role === 'user' ? 'Klient' : 'Assistent'}: ${m.content}`).join('\n');
+
+  const response = await openai.chat.completions.create({
+    model: await getAiModel(),
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
+      { role: 'user', content: transcript }
+    ]
+  });
+
+  return JSON.parse(response.choices[0].message.content);
+}
+
 async function extractQualificationSummary(conversationId) {
   try {
     const messages = await getMessages(conversationId);
-    if (!messages.length) return null;
-    const transcript = messages.map(m => `${m.role === 'user' ? 'Klient' : 'Assistent'}: ${m.content}`).join('\n');
-
-    const response = await openai.chat.completions.create({
-      model: await getAiModel(),
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
-        { role: 'user', content: transcript }
-      ]
-    });
-
-    const summary = JSON.parse(response.choices[0].message.content);
+    const summary = await extractSummaryFromMessages(messages);
+    if (!summary) return null;
     await supabase.from('conversations').update({ qualification_summary: summary }).eq('id', conversationId);
     return summary;
   } catch (err) {
     console.error('Qualification extraction error:', err);
+    return null;
+  }
+}
+
+async function extractTestQualificationSummary(testConversationId) {
+  try {
+    const { data } = await supabase
+      .from('test_messages')
+      .select('*')
+      .eq('test_conversation_id', testConversationId)
+      .order('created_at', { ascending: true });
+    const summary = await extractSummaryFromMessages(data || []);
+    if (!summary) return null;
+    await supabase.from('test_conversations').update({ qualification_summary: summary }).eq('id', testConversationId);
+    return summary;
+  } catch (err) {
+    console.error('Test qualification extraction error:', err);
     return null;
   }
 }
@@ -539,7 +561,10 @@ app.post('/test-chat', requireAuth, async (req, res) => {
 
     if (testConversationId) {
       await supabase.from('test_messages').insert({ test_conversation_id: testConversationId, role: 'assistant', content: reply });
-      if (ended) await supabase.from('test_conversations').update({ ended: true }).eq('id', testConversationId);
+      if (ended) {
+        await supabase.from('test_conversations').update({ ended: true }).eq('id', testConversationId);
+        extractTestQualificationSummary(testConversationId);
+      }
     }
 
     res.json({ reply, ended });

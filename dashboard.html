@@ -223,6 +223,7 @@
       <div class="main-header">
         <h2>Testi AI agenti</h2>
       </div>
+      <div class="summary-box" id="test-summary-box" style="display:none"></div>
       <div class="messages" id="test-messages">
         <div class="empty">Vali vasakult tooteliik, et alustada</div>
       </div>
@@ -751,8 +752,11 @@
   }
 
   function renderSummaryBox(conv) {
-    const box = document.getElementById('summary-box');
-    const summary = conv.qualification_summary;
+    renderSummaryInto('summary-box', conv.qualification_summary);
+  }
+
+  function renderSummaryInto(boxId, summary) {
+    const box = document.getElementById(boxId);
     if (!summary) {
       box.style.display = 'none';
       box.innerHTML = '';
@@ -889,6 +893,7 @@
     testMessages = [];
     testEnded = false;
     testConversationId = null;
+    renderSummaryInto('test-summary-box', null);
     const container = document.getElementById('test-messages');
     if (!testVariantChosen) {
       container.innerHTML = '<div class="empty">Vali vasakult tooteliik, et alustada</div>';
@@ -926,7 +931,11 @@
       testMessages.push({ role: 'assistant', content: data.reply });
       testEnded = data.ended;
       renderTestMessages();
-      if (testEnded) loadTestHistory();
+      if (testEnded) {
+        document.getElementById('test-summary-box').style.display = 'block';
+        document.getElementById('test-summary-box').innerHTML = '<div class="summary-title">Kokkuvõte genereeritakse taustal — vali see vestlus mõne hetke pärast "Varasemad testid" alt uuesti, et seda näha</div>';
+        loadTestHistory();
+      }
     } catch (e) {
       console.error(e);
     }
@@ -972,6 +981,7 @@
       .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
       .map(m => ({ role: m.role, content: m.content }));
     renderTestMessages();
+    renderSummaryInto('test-summary-box', tc.qualification_summary);
   }
 
   initAuth();
