@@ -458,6 +458,8 @@ Väljasta AINULT JSON, täpselt sellises struktuuris, muud teksti ei tohi olla:
   ]
 }
 
+Kui assistent esitas valikvastustega küsimuse (nt "A – vähem kui 6 000 kWh, B – 6 000 kuni 12 000 kWh, C – üle 12 000 kWh") ja klient vastas ainult tähega (nt "B"), kirjuta answer väljale TÄHE ASEMEL selle valiku täielik sisu (nt "6 000 kuni 12 000 kWh"), mitte pelgalt tähte.
+
 Kui klient ei vastanud mõnele küsimusele, jäta see rida loetelust välja. Kirjuta eesti keeles, kokkuvõtvalt ja konkreetselt.`;
 
 async function extractSummaryFromMessages(messages) {
