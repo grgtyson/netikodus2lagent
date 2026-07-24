@@ -365,7 +365,7 @@ app.post('/sms-textmagic', upload.none(), async (req, res) => {
 app.get('/conversations', requireAuth, async (req, res) => {
   const { data } = await supabase
     .from('conversations')
-    .select('*, messages(*), leads(name, email)')
+    .select('*, messages(*), leads(name, email, status)')
     .order('created_at', { ascending: false });
   res.json(data);
 });

@@ -26,6 +26,7 @@
     .conv-item.active { background: #1a1a1a; border-left: 2px solid #3b82f6; }
     .conv-phone { font-size: 14px; font-weight: 500; }
     .conv-email { font-size: 11px; color: #777; margin-top: 2px; }
+    .conv-status { display: inline-block; font-size: 10px; color: #60a5fa; background: #1d3a6e; padding: 2px 6px; border-radius: 10px; margin-top: 6px; }
     .conv-preview { font-size: 12px; color: #555; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .conv-time { font-size: 11px; color: #444; margin-top: 4px; }
     
@@ -569,12 +570,14 @@
         const msgs = conv.messages || [];
         const last = msgs[msgs.length - 1];
         const lead = (conv.leads && conv.leads[0]) || null;
+        const statusLabel = lead && lead.status ? (STATUSES.find(s => s.key === lead.status)?.label || lead.status) : null;
         const div = document.createElement('div');
         div.className = 'conv-item' + (conv.id === activeId ? ' active' : '');
         div.dataset.id = conv.id;
         div.innerHTML = `
-          <div class="conv-phone">${lead && lead.name ? lead.name + ' · ' : ''}+${conv.phone_number}</div>
+          <div class="conv-phone">${lead && lead.name ? lead.name + ' · ' : ''}${conv.phone_number}</div>
           ${lead && lead.email ? `<div class="conv-email">${lead.email}</div>` : ''}
+          ${statusLabel ? `<div class="conv-status">${statusLabel}</div>` : ''}
           <div class="conv-preview">${last ? last.content : 'Sõnumeid pole'}</div>
           <div class="conv-time">${new Date(conv.created_at).toLocaleString('et-EE')}</div>
         `;
@@ -597,7 +600,7 @@
     if (!conv) return;
     document.querySelectorAll('.conv-item').forEach(e => e.classList.remove('active'));
     el.classList.add('active');
-    document.getElementById('active-phone').textContent = `+${conv.phone_number}`;
+    document.getElementById('active-phone').textContent = conv.phone_number;
     document.getElementById('header-actions').style.display = 'flex';
     document.getElementById('send-bar').style.display = 'flex';
 
