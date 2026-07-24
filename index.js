@@ -247,6 +247,7 @@ async function handleInboundSMS(from, text, res) {
           .update({ last_message_sent_at: new Date(), bump_sent: false })
           .eq('conversation_id', conversation.id);
         console.log('SMS sent successfully');
+        if (ended) extractQualificationSummary(conversation.id);
       } catch (err) {
         console.error('Delayed SMS send error:', err);
       }
@@ -325,6 +326,7 @@ app.post('/webhook', async (req, res) => {
             .from('leads')
             .update({ last_message_sent_at: new Date(), bump_sent: false })
             .eq('conversation_id', conversation.id);
+          if (ended) extractQualificationSummary(conversation.id);
         } catch (err) {
           console.error('Delayed WhatsApp send error:', err);
         }
@@ -409,6 +411,12 @@ app.post('/conversations/:id/send', requireAuth, async (req, res) => {
   }
 });
 
+app.post('/conversations/:id/extract', requireAuth, async (req, res) => {
+  const summary = await extractQualificationSummary(req.params.id);
+  if (!summary) return res.status(500).json({ error: 'Extraction failed' });
+  res.json({ summary });
+});
+
 app.get('/prompt', requireAuth, async (req, res) => {
   const prompt = await getSystemPrompt();
   const result = { prompt };
@@ -439,6 +447,42 @@ async function getAiModel() {
 
 async function getMaxResponseTokens() {
   return parseInt(await getSetting('max_response_tokens', '150'));
+}
+
+const EXTRACTION_SYSTEM_PROMPT = `Sa saad SMS-vestluse ajaloo müügiassistendi ja kliendi vahel. Sinu ülesanne on eraldada vestlusest kõik küsimused, mida assistent kliendilt küsis, ja kliendi vastused neile.
+
+Väljasta AINULT JSON, täpselt sellises struktuuris, muud teksti ei tohi olla:
+{
+  "answers": [
+    { "question": "lühike küsimuse kirjeldus", "answer": "kliendi vastus" }
+  ],
+  "summary": "1-2 lauseline kokkuvõte kogu vestlusest"
+}
+
+Kui klient ei vastanud mõnele küsimusele, jäta see rida loetelust välja. Kirjuta eesti keeles, kokkuvõtvalt ja konkreetselt.`;
+
+async function extractQualificationSummary(conversationId) {
+  try {
+    const messages = await getMessages(conversationId);
+    if (!messages.length) return null;
+    const transcript = messages.map(m => `${m.role === 'user' ? 'Klient' : 'Assistent'}: ${m.content}`).join('\n');
+
+    const response = await openai.chat.completions.create({
+      model: await getAiModel(),
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
+        { role: 'user', content: transcript }
+      ]
+    });
+
+    const summary = JSON.parse(response.choices[0].message.content);
+    await supabase.from('conversations').update({ qualification_summary: summary }).eq('id', conversationId);
+    return summary;
+  } catch (err) {
+    console.error('Qualification extraction error:', err);
+    return null;
+  }
 }
 
 app.get('/ai-models', requireAuth, async (req, res) => {

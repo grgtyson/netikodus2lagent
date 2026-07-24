@@ -34,6 +34,11 @@
     .main-header { padding: 16px 24px; border-bottom: 1px solid #222; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .main-header h2 { font-size: 15px; font-weight: 500; }
     .header-actions { display: flex; align-items: center; gap: 8px; }
+    .summary-box { padding: 14px 24px; border-bottom: 1px solid #222; background: #141414; }
+    .summary-box .summary-title { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .summary-box .summary-text { font-size: 13px; color: #ccc; margin-bottom: 8px; }
+    .summary-box .summary-qa { font-size: 12px; color: #aaa; margin-top: 4px; }
+    .summary-box .summary-qa b { color: #e8e8e8; font-weight: 500; }
     .ai-status { font-size: 11px; padding: 4px 10px; border-radius: 20px; }
     .ai-status.on { background: #14321d; color: #4ade80; }
     .ai-status.off { background: #3a1d1d; color: #f87171; }
@@ -173,9 +178,11 @@
         <div class="header-actions" id="header-actions" style="display:none">
           <span class="ai-status on" id="ai-status">AI aktiivne</span>
           <button class="takeover-btn" id="takeover-btn" onclick="toggleTakeover()">Võta üle</button>
+          <button class="refresh-btn" onclick="generateSummary()">✦ Genereeri kokkuvõte</button>
           <button class="refresh-btn" onclick="loadConversations()">↻ Uuenda</button>
         </div>
       </div>
+      <div class="summary-box" id="summary-box" style="display:none"></div>
       <div class="messages" id="messages">
         <div class="empty">Vali vasakult vestlus</div>
       </div>
@@ -726,6 +733,7 @@
     document.getElementById('send-bar').style.display = 'flex';
 
     updateTakeoverUI(conv);
+    renderSummaryBox(conv);
 
     const msgs = conv.messages || [];
     const container = document.getElementById('messages');
@@ -740,6 +748,45 @@
       </div>
     `).join('');
     container.scrollTop = container.scrollHeight;
+  }
+
+  function renderSummaryBox(conv) {
+    const box = document.getElementById('summary-box');
+    const summary = conv.qualification_summary;
+    if (!summary) {
+      box.style.display = 'none';
+      box.innerHTML = '';
+      return;
+    }
+    const qaHtml = (summary.answers || []).map(qa => `
+      <div class="summary-qa"><b>${qa.question}:</b> ${qa.answer}</div>
+    `).join('');
+    box.innerHTML = `
+      <div class="summary-title">Vestluse kokkuvõte</div>
+      ${summary.summary ? `<div class="summary-text">${summary.summary}</div>` : ''}
+      ${qaHtml}
+    `;
+    box.style.display = 'block';
+  }
+
+  async function generateSummary() {
+    if (!activeId) return;
+    const box = document.getElementById('summary-box');
+    box.style.display = 'block';
+    box.innerHTML = '<div class="summary-title">Genereerin kokkuvõtet...</div>';
+    try {
+      const res = await apiFetch(`${API}/conversations/${activeId}/extract`, { method: 'POST' });
+      const data = await res.json();
+      if (data.summary) {
+        const conv = conversations.find(c => c.id === activeId);
+        if (conv) conv.qualification_summary = data.summary;
+        renderSummaryBox(conv);
+      } else {
+        box.innerHTML = '<div class="summary-title">Kokkuvõtte genereerimine ebaõnnestus</div>';
+      }
+    } catch (e) {
+      box.innerHTML = '<div class="summary-title">Kokkuvõtte genereerimine ebaõnnestus</div>';
+    }
   }
 
   function updateTakeoverUI(conv) {
