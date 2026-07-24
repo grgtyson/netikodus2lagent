@@ -447,10 +447,24 @@ app.get('/ai-models', requireAuth, async (req, res) => {
 });
 
 app.get('/test-chat/first-message', requireAuth, async (req, res) => {
-  const productType = req.query.productType || null;
-  const template = await getFirstMessageTemplate(productType);
-  const message = renderTemplate(template, { name: 'Test' });
-  res.json({ message });
+  try {
+    const productType = req.query.productType || null;
+    const model = req.query.model || await getAiModel();
+    const template = await getFirstMessageTemplate(productType);
+    const message = renderTemplate(template, { name: 'Test' });
+
+    const { data: testConv } = await supabase
+      .from('test_conversations')
+      .insert({ product_type: productType, model })
+      .select()
+      .single();
+    await supabase.from('test_messages').insert({ test_conversation_id: testConv.id, role: 'assistant', content: message });
+
+    res.json({ message, testConversationId: testConv.id });
+  } catch (err) {
+    console.error('Test chat first-message error:', err);
+    res.sendStatus(500);
+  }
 });
 
 app.post('/test-chat', requireAuth, async (req, res) => {
@@ -458,17 +472,39 @@ app.post('/test-chat', requireAuth, async (req, res) => {
     const productType = req.body.productType || null;
     const messages = Array.isArray(req.body.messages) ? req.body.messages : [];
     const model = req.body.model || await getAiModel();
+    const testConversationId = req.body.testConversationId || null;
+
+    const lastMessage = messages[messages.length - 1];
+    if (testConversationId && lastMessage?.role === 'user') {
+      await supabase.from('test_messages').insert({ test_conversation_id: testConversationId, role: 'user', content: lastMessage.content });
+    }
+
     const systemPrompt = withConversationEndInstruction(await getSystemPrompt(productType));
     const response = await openai.chat.completions.create({
       model,
       messages: [{ role: 'system', content: systemPrompt }, ...messages]
     });
     const { reply, ended } = extractConversationEnd(response.choices[0].message.content);
+
+    if (testConversationId) {
+      await supabase.from('test_messages').insert({ test_conversation_id: testConversationId, role: 'assistant', content: reply });
+      if (ended) await supabase.from('test_conversations').update({ ended: true }).eq('id', testConversationId);
+    }
+
     res.json({ reply, ended });
   } catch (err) {
     console.error('Test chat error:', err);
     res.sendStatus(500);
   }
+});
+
+app.get('/test-conversations', requireAuth, async (req, res) => {
+  const { data } = await supabase
+    .from('test_conversations')
+    .select('*, test_messages(*)')
+    .order('created_at', { ascending: false })
+    .limit(50);
+  res.json(data);
 });
 
 app.get('/templates', requireAuth, async (req, res) => {

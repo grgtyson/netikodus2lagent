@@ -79,6 +79,8 @@
     .field-block textarea { min-height: 80px; }
     .field-block input[type=number] { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 8px 10px; color: #e8e8e8; font-size: 13px; width: 140px; }
     .field-block select { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 8px 10px; color: #e8e8e8; font-size: 13px; width: 260px; }
+    .field-block input[type=text], .field-block input[type=email] { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 8px 10px; color: #e8e8e8; font-size: 13px; width: 320px; max-width: 100%; }
+    code { background: #1a1a1a; padding: 1px 6px; border-radius: 4px; font-size: 12px; }
 
     .refresh-btn { background: #1e1e1e; border: 1px solid #2a2a2a; color: #aaa; padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; }
     .refresh-btn:hover { background: #252525; color: #e8e8e8; }
@@ -138,6 +140,7 @@
   <div class="tab active" onclick="showTab('pipeline', this)">Leads</div>
   <div class="tab" onclick="showTab('conversations', this)">Vestlused</div>
   <div class="tab" onclick="showTab('test-chat', this)">Testi vestlust</div>
+  <div class="tab" onclick="showTab('test-lead', this)">Test-lead</div>
   <div class="tab" onclick="showTab('prompt', this)">AI Prompt</div>
   <div class="tab" onclick="showTab('messages-settings', this)">Sõnumid</div>
   <button class="logout-btn" onclick="doLogout()">Logi välja</button>
@@ -201,9 +204,13 @@
           <option>Laadin...</option>
         </select>
       </div>
-      <div style="padding: 0 16px;">
+      <div style="padding: 0 16px 16px;">
         <button class="refresh-btn" onclick="resetTestChat()">↺ Lähtesta vestlus</button>
       </div>
+      <div class="sidebar-header">
+        <h1 style="font-size:12px; color:#888;">Varasemad testid</h1>
+      </div>
+      <div class="conversations" id="test-history-list"></div>
     </div>
     <div class="main">
       <div class="main-header">
@@ -215,6 +222,77 @@
       <div class="send-bar">
         <input type="text" id="test-message-input" placeholder="Kirjuta sõnum nagu klient..." onkeydown="if(event.key==='Enter') sendTestMessage()">
         <button onclick="sendTestMessage()">Saada</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Test-lead -->
+  <div class="page" id="page-test-lead">
+    <div class="prompt-page">
+      <h2>Testi lead-vormi</h2>
+      <p>See vorm saadab päringu otse <code>/lead</code> endpointi — täpselt sama voog, mis kodulehe vormi täitmisel, sh päris esimese SMS-i saatmine.</p>
+
+      <div class="field-block">
+        <span class="field-label">Soovin päikesepaneele/akut:</span>
+        <select id="test-lead-client-type">
+          <option value="Kodule">Kodule</option>
+          <option value="Ettevõttele">Ettevõttele</option>
+        </select>
+      </div>
+
+      <div class="field-block">
+        <span class="field-label">Kas soovid päikesepaneele, akut või mõlemat?</span>
+        <select id="test-lead-product-type">
+          <option value="Päikesepaneele">Päikesepaneele</option>
+          <option value="Akut">Akut</option>
+          <option value="Mõlemat">Mõlemat</option>
+        </select>
+      </div>
+
+      <div class="field-block">
+        <span class="field-label">Kas soovite maa- või katusepaigaldust?</span>
+        <select id="test-lead-installation-type">
+          <option value="Katusele">Katusele</option>
+          <option value="Maa peale">Maa peale</option>
+        </select>
+      </div>
+
+      <div class="field-block">
+        <span class="field-label">Kas tegemist on viil- või lamekatusega?</span>
+        <select id="test-lead-roof-type">
+          <option value="Viilkatus">Viilkatus</option>
+          <option value="Lamekatus">Lamekatus</option>
+        </select>
+      </div>
+
+      <div class="field-block">
+        <span class="field-label">Email</span>
+        <input type="email" id="test-lead-email" placeholder="test@example.com">
+      </div>
+
+      <div class="field-block">
+        <span class="field-label">Täisnimi</span>
+        <input type="text" id="test-lead-name" placeholder="Test Testman">
+      </div>
+
+      <div class="field-block">
+        <span class="field-label">Telefon</span>
+        <input type="text" id="test-lead-phone" placeholder="5xxxxxxx">
+      </div>
+
+      <div class="field-block">
+        <span class="field-label">Aadress</span>
+        <input type="text" id="test-lead-address" placeholder="Tallinn">
+      </div>
+
+      <div class="field-block">
+        <span class="field-label">Ettevõtte nimi (valikuline)</span>
+        <input type="text" id="test-lead-company" placeholder="">
+      </div>
+
+      <div style="display:flex; align-items:center; gap:12px;">
+        <button class="save-btn" onclick="submitTestLead()">Saada test-lead</button>
+        <span class="save-msg" id="test-lead-msg" style="display:none;">✓ Saadetud</span>
       </div>
     </div>
   </div>
@@ -414,7 +492,7 @@
     if (tab === 'prompt') loadPrompt();
     if (tab === 'pipeline') loadLeads();
     if (tab === 'messages-settings') loadTemplates();
-    if (tab === 'test-chat') loadTestModelOptions();
+    if (tab === 'test-chat') { loadTestModelOptions(); loadTestHistory(); }
   }
 
   let testModelLoaded = false;
@@ -426,6 +504,41 @@
     const templatesRes = await apiFetch(`${API}/templates`);
     const templatesData = await templatesRes.json();
     populateModelSelect(document.getElementById('test-model-select'), models, templatesData.ai_model);
+  }
+
+  async function submitTestLead() {
+    const body = {
+      'Soovin päikesepaneele/akut:': document.getElementById('test-lead-client-type').value,
+      'Kas soovid päikesepaneele, akut või mõlemat?': document.getElementById('test-lead-product-type').value,
+      'Kas soovite maa- või katusepaigaldust?': document.getElementById('test-lead-installation-type').value,
+      'Kas tegemist on viil- või lamekatusega?': document.getElementById('test-lead-roof-type').value,
+      'E-post': document.getElementById('test-lead-email').value,
+      'Täisnimi': document.getElementById('test-lead-name').value,
+      'Telefon': document.getElementById('test-lead-phone').value,
+      'Aadress': document.getElementById('test-lead-address').value,
+      'Ettevõtte nimi': document.getElementById('test-lead-company').value
+    };
+
+    const msg = document.getElementById('test-lead-msg');
+    try {
+      const res = await fetch(`${API}/lead`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (res.ok) {
+        msg.textContent = '✓ Lead saadetud, esimene SMS peaks varsti saabuma';
+        msg.style.color = '#22c55e';
+      } else {
+        msg.textContent = '✗ Viga lead saatmisel (kontrolli telefoninumbrit)';
+        msg.style.color = '#f87171';
+      }
+    } catch (e) {
+      msg.textContent = '✗ Viga lead saatmisel';
+      msg.style.color = '#f87171';
+    }
+    msg.style.display = 'inline';
+    setTimeout(() => msg.style.display = 'none', 4000);
   }
 
   async function loadLeads() {
@@ -697,6 +810,7 @@
   let testMessages = [];
   let testEnded = false;
   let testVariantChosen = false;
+  let testConversationId = null;
 
   function selectTestVariant(variant, el) {
     testVariant = variant;
@@ -719,16 +833,20 @@
   async function resetTestChat() {
     testMessages = [];
     testEnded = false;
+    testConversationId = null;
     const container = document.getElementById('test-messages');
     if (!testVariantChosen) {
       container.innerHTML = '<div class="empty">Vali vasakult tooteliik, et alustada</div>';
       return;
     }
     container.innerHTML = '<div class="empty">Laadin...</div>';
-    const res = await apiFetch(`${API}/test-chat/first-message?productType=${encodeURIComponent(testVariant)}`);
+    const model = document.getElementById('test-model-select').value;
+    const res = await apiFetch(`${API}/test-chat/first-message?productType=${encodeURIComponent(testVariant)}&model=${encodeURIComponent(model)}`);
     const data = await res.json();
+    testConversationId = data.testConversationId;
     testMessages.push({ role: 'assistant', content: data.message });
     renderTestMessages();
+    loadTestHistory();
   }
 
   async function sendTestMessage() {
@@ -747,17 +865,58 @@
       const res = await apiFetch(`${API}/test-chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productType: testVariant, messages: testMessages, model })
+        body: JSON.stringify({ productType: testVariant, messages: testMessages, model, testConversationId })
       });
       const data = await res.json();
       testMessages.push({ role: 'assistant', content: data.reply });
       testEnded = data.ended;
       renderTestMessages();
+      if (testEnded) loadTestHistory();
     } catch (e) {
       console.error(e);
     }
     input.disabled = false;
     input.focus();
+  }
+
+  async function loadTestHistory() {
+    try {
+      const res = await apiFetch(`${API}/test-conversations`);
+      const data = await res.json();
+      const list = document.getElementById('test-history-list');
+      list.innerHTML = '';
+      data.forEach(tc => {
+        const div = document.createElement('div');
+        div.className = 'conv-item';
+        const variantLabel = tc.product_type || 'Vaikimisi';
+        div.innerHTML = `
+          <div class="conv-phone">${variantLabel}${tc.ended ? ' · lõppenud' : ''}</div>
+          <div class="conv-preview">${tc.model || ''}</div>
+          <div class="conv-time">${new Date(tc.created_at).toLocaleString('et-EE')}</div>
+        `;
+        div.onclick = () => viewTestHistory(tc);
+        list.appendChild(div);
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  function viewTestHistory(tc) {
+    testVariant = tc.product_type || '';
+    testVariantChosen = true;
+    testConversationId = tc.id;
+    testEnded = !!tc.ended;
+    document.querySelectorAll('.test-variant-btn').forEach(b => b.classList.toggle('active', b.dataset.variant === testVariant));
+    const modelSelect = document.getElementById('test-model-select');
+    if (tc.model && [...modelSelect.options].some(o => o.value === tc.model)) {
+      modelSelect.value = tc.model;
+    }
+    testMessages = (tc.test_messages || [])
+      .slice()
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      .map(m => ({ role: m.role, content: m.content }));
+    renderTestMessages();
   }
 
   initAuth();
