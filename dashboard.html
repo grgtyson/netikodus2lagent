@@ -343,6 +343,12 @@
       </div>
 
       <div class="field-block">
+        <span class="field-label">Vastuse pikkuse limiit (tokenites)</span>
+        <span class="field-hint">Piirab, kui pikk võib AI vastus maksimaalselt olla (~1 token ≈ 0.75 sõna). Liiga väike väärtus võib vastuse keset lauset katkestada.</span>
+        <input type="number" id="max-response-tokens-input" value="150">
+      </div>
+
+      <div class="field-block">
         <span class="field-label">Esimene sõnum — Vaikimisi</span>
         <textarea id="first-message-text" placeholder="Laadin..."></textarea>
       </div>
@@ -635,6 +641,7 @@
     });
     const models = await fetchAiModels();
     populateModelSelect(document.getElementById('ai-model-select'), models, data.ai_model);
+    document.getElementById('max-response-tokens-input').value = data.max_response_tokens;
     const bumpRes = await apiFetch(`${API}/settings/bump-delay`);
     const bumpData = await bumpRes.json();
     document.getElementById('bump-delay-input').value = bumpData.seconds;
@@ -648,8 +655,9 @@
     const reply_delay_seconds = parseInt(document.getElementById('reply-delay-input').value);
     const bumpDelaySeconds = parseInt(document.getElementById('bump-delay-input').value);
     const ai_model = document.getElementById('ai-model-select').value;
+    const max_response_tokens = parseInt(document.getElementById('max-response-tokens-input').value);
 
-    const body = { first_message_template, bump_message_template, no_response_delay_seconds, first_message_delay_seconds, reply_delay_seconds, ai_model };
+    const body = { first_message_template, bump_message_template, no_response_delay_seconds, first_message_delay_seconds, reply_delay_seconds, ai_model, max_response_tokens };
     PRODUCT_VARIANTS.forEach(variant => {
       body[`first_message_template_${variant}`] = document.getElementById(`first-message-text-${variant}`).value;
       body[`bump_message_template_${variant}`] = document.getElementById(`bump-message-text-${variant}`).value;

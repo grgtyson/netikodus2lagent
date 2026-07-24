@@ -228,6 +228,7 @@ async function handleInboundSMS(from, text, res) {
     const systemPrompt = withConversationEndInstruction(await getSystemPrompt(productType));
     const response = await openai.chat.completions.create({
       model: await getAiModel(),
+      max_tokens: await getMaxResponseTokens(),
       messages: [{ role: 'system', content: systemPrompt }, ...chatHistory]
     });
     const { reply, ended } = extractConversationEnd(response.choices[0].message.content);
@@ -295,6 +296,7 @@ app.post('/webhook', async (req, res) => {
       const systemPrompt = withConversationEndInstruction(await getSystemPrompt(productType));
       const response = await openai.chat.completions.create({
         model: await getAiModel(),
+        max_tokens: await getMaxResponseTokens(),
         messages: [{ role: 'system', content: systemPrompt }, ...chatHistory]
       });
       const { reply, ended } = extractConversationEnd(response.choices[0].message.content);
@@ -435,6 +437,10 @@ async function getAiModel() {
   return await getSetting('ai_model', 'gpt-4o');
 }
 
+async function getMaxResponseTokens() {
+  return parseInt(await getSetting('max_response_tokens', '150'));
+}
+
 app.get('/ai-models', requireAuth, async (req, res) => {
   try {
     const list = await openai.models.list();
@@ -482,6 +488,7 @@ app.post('/test-chat', requireAuth, async (req, res) => {
     const systemPrompt = withConversationEndInstruction(await getSystemPrompt(productType));
     const response = await openai.chat.completions.create({
       model,
+      max_tokens: await getMaxResponseTokens(),
       messages: [{ role: 'system', content: systemPrompt }, ...messages]
     });
     const { reply, ended } = extractConversationEnd(response.choices[0].message.content);
@@ -514,13 +521,15 @@ app.get('/templates', requireAuth, async (req, res) => {
   const firstMessageDelay = await getSetting('first_message_delay_seconds', '0');
   const replyDelay = await getSetting('reply_delay_seconds', '0');
   const aiModel = await getAiModel();
+  const maxResponseTokens = await getMaxResponseTokens();
   const result = {
     first_message_template: firstMessage,
     bump_message_template: bumpMessage,
     no_response_delay_seconds: parseInt(noResponseDelay),
     first_message_delay_seconds: parseInt(firstMessageDelay),
     reply_delay_seconds: parseInt(replyDelay),
-    ai_model: aiModel
+    ai_model: aiModel,
+    max_response_tokens: maxResponseTokens
   };
   for (const variant of PRODUCT_VARIANTS) {
     result[`first_message_template_${variant}`] = await getSetting(`first_message_template_${variant}`, '');
@@ -530,13 +539,14 @@ app.get('/templates', requireAuth, async (req, res) => {
 });
 
 app.post('/templates', requireAuth, async (req, res) => {
-  const { first_message_template, bump_message_template, no_response_delay_seconds, first_message_delay_seconds, reply_delay_seconds, ai_model } = req.body;
+  const { first_message_template, bump_message_template, no_response_delay_seconds, first_message_delay_seconds, reply_delay_seconds, ai_model, max_response_tokens } = req.body;
   if (first_message_template !== undefined) await setSetting('first_message_template', first_message_template);
   if (bump_message_template !== undefined) await setSetting('bump_message_template', bump_message_template);
   if (no_response_delay_seconds !== undefined) await setSetting('no_response_delay_seconds', String(no_response_delay_seconds));
   if (first_message_delay_seconds !== undefined) await setSetting('first_message_delay_seconds', String(first_message_delay_seconds));
   if (reply_delay_seconds !== undefined) await setSetting('reply_delay_seconds', String(reply_delay_seconds));
   if (ai_model !== undefined) await setSetting('ai_model', ai_model);
+  if (max_response_tokens !== undefined) await setSetting('max_response_tokens', String(max_response_tokens));
   for (const variant of PRODUCT_VARIANTS) {
     const firstVariant = req.body[`first_message_template_${variant}`];
     if (firstVariant !== undefined) await setSetting(`first_message_template_${variant}`, firstVariant);
